@@ -1,0 +1,71 @@
+@page "/login"
+@inject IHttpClientFactory HttpClientFactory
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthStateProvider
+@using System.Net.Http.Json
+
+<h3>Đăng nhập</h3>
+
+<div class="card p-4 w-50">
+    <div class="form-group mb-2">
+        <label>Email</label>
+        <input @bind="email" class="form-control" />
+    </div>
+    <div class="form-group mb-3">
+        <label>Mật khẩu</label>
+        <input type="password" @bind="password" class="form-control" />
+    </div>
+    <button class="btn btn-primary" @onclick="HandleLogin">Đăng nhập</button>
+    <p>Chưa có tài khoản? <a href="/register">Đăng ký</a></p>
+</div>
+
+@code {
+    private string email = "";
+    private string password = "";
+
+    private async Task HandleLogin()
+    {
+        try
+        {
+            var client = HttpClientFactory.CreateClient("ServerAPI");
+            var payload = new { email, password };
+            var response = await client.PostAsJsonAsync("api/auth/login", payload);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<TokenResponse>();
+
+                if (!string.IsNullOrWhiteSpace(result?.token))
+                {
+                    Console.WriteLine("✅ Token saved: " + result.token.Substring(0, Math.Min(20, result.token.Length)));
+                    await JS.InvokeVoidAsync("localStorage.setItem", "jwt", result.token);
+
+                    // cập nhật trạng thái đăng nhập
+                    if (AuthStateProvider is DoAnTotNghiep.Services.CustomAuthenticationStateProvider customProvider)
+                        customProvider.NotifyUserAuthentication(result.token);
+
+                    Navigation.NavigateTo("/", forceLoad: true);
+                }
+                else
+                {
+                    Console.WriteLine("⚠️ Không nhận được token từ server.");
+                }
+            }
+            else
+            {
+                Console.WriteLine("❌ Đăng nhập thất bại. Mã lỗi: " + response.StatusCode);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("⚠️ Lỗi: " + ex.Message);
+        }
+    }
+
+    public class TokenResponse
+    {
+        public string token { get; set; }
+        public DateTime expiration { get; set; }
+    }
+}

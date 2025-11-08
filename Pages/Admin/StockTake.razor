@@ -1,0 +1,483 @@
+@page "/admin/stock-take"
+@attribute [Authorize(Roles = "Admin, Warehouse")]
+@using Microsoft.EntityFrameworkCore
+@using System.Security.Claims
+@using System.Linq
+@using DoAnTotNghiep.Models
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ToastService ToastSvc
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
+
+<h3>Kiểm kê & Yêu cầu Điều chỉnh Tồn kho</h3>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <p class="card-text">
+            Sử dụng giao diện này để kiểm tra và <strong>gửi yêu cầu</strong> cập nhật số lượng tồn kho thực tế của sản phẩm.
+            <br/>Lưu ý: Yêu cầu sẽ ở trạng thái <em>Pending</em> — chỉ Admin mới có quyền phê duyệt (Approve) hoặc từ chối (Reject).
+        </p>
+
+        <div class="row mb-3">
+            <div class="col-md-6">
+                <input @bind="searchName" class="form-control" placeholder="Tìm kiếm theo tên sản phẩm..." />
+            </div>
+            <div class="col-md-6 text-end">
+                <button class="btn btn-primary me-2" @onclick="SearchProducts"><i class="bi bi-search"></i> Tìm kiếm</button>
+                <button class="btn btn-secondary" @onclick="ClearSearch"><i class="bi bi-x-circle"></i> Xóa lọc</button>
+            </div>
+        </div>
+
+        @if (productsPage == null)
+        {
+            <LoadingSpinner />
+        }
+        else
+        {
+            <table class="table table-bordered">
+                <thead class="table-light">
+                    <tr>
+                        <th>Sản phẩm</th>
+                        <th class="text-center">Tồn kho Hệ thống</th>
+                        <th class="text-center" style="width:150px">Số lượng Thực tế</th>
+                        <th style="width:260px">Hành động</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (productsPage.Any())
+                    {
+                        @foreach (var p in productsPage)
+                        {
+                            <tr>
+                                <td>@p.Name</td>
+                                <td class="text-center">@p.StockQuantity</td>
+                                <td>
+                                    <InputNumber TValue="int" @bind-Value="p.PhysicalCount" class="form-control" />
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-primary me-2"
+                                            @onclick="() => RequestAdjustment(p)"
+                                            disabled="@(p.PhysicalCount < 0 || p.PhysicalCount == p.StockQuantity)">
+                                        <i class="bi bi-send"></i> Yêu cầu điều chỉnh
+                                    </button>
+
+                                    <a class="btn btn-sm btn-outline-secondary" href="@($"/admin/stock-adjustments?productId={p.Id}")">
+                                        Xem yêu cầu
+                                    </a>
+                                </td>
+                            </tr>
+                        }
+                    }
+                    else
+                    {
+                        <tr><td colspan="4" class="text-center text-muted">Không tìm thấy sản phẩm phù hợp.</td></tr>
+                    }
+                </tbody>
+            </table>
+
+            <nav class="mt-3">
+                <ul class="pagination justify-content-center">
+                    <li class="page-item @(currentPage == 1 ? "disabled" : "")">
+                        <button class="page-link" @onclick="() => ChangePage(currentPage - 1)">Trước</button>
+                    </li>
+                    @for (int i = 1; i <= totalPages; i++)
+                    {
+                        <li class="page-item @(currentPage == i ? "active" : "")">
+                            <button class="page-link" @onclick="() => ChangePage(i)">@i</button>
+                        </li>
+                    }
+                    <li class="page-item @(currentPage == totalPages ? "disabled" : "")">
+                        <button class="page-link" @onclick="() => ChangePage(currentPage + 1)">Sau</button>
+                    </li>
+                </ul>
+            </nav>
+        }
+    </div>
+</div>
+
+@* === Admin section: Approve / Reject requests ngay trên trang StockTake === *@
+<AuthorizeView Roles="Admin">
+    <div class="card">
+        <div class="card-body">
+            <h5>Yêu cầu điều chỉnh tồn kho (Admin)</h5>
+
+            <div class="d-flex mb-3 align-items-center">
+                <label class="me-2">Trạng thái:</label>
+                <select class="form-select w-auto me-3" @bind="adminFilterStatus">
+                    <option value="">Tất cả</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Approved">Approved</option>
+                    <option value="Rejected">Rejected</option>
+                </select>
+
+                <label class="me-2">Tìm:</label>
+                <input class="form-control w-50" placeholder="tên sản phẩm hoặc request id" @bind="adminSearch" />
+                <button class="btn btn-primary ms-3" @onclick="LoadRequests">Lọc</button>
+            </div>
+
+            @if (requests == null)
+            {
+                <LoadingSpinner />
+            }
+            else if (!requests.Any())
+            {
+                <div class="alert alert-info">Không có yêu cầu.</div>
+            }
+            else
+            {
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Sản phẩm</th>
+                            <th>Hệ thống</th>
+                            <th>Yêu cầu</th>
+                            <th>Người yêu cầu</th>
+                            <th>Ngày</th>
+                            <th>Trạng thái</th>
+                            <th>Hành động</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in requests)
+                        {
+                            <tr>
+                                <td>@r.Id</td>
+                                <td>@r.ProductName (ID:@r.ProductId)</td>
+                                <td>@r.OldQuantity</td>
+                                <td>@r.RequestedQuantity</td>
+                                <td>@r.RequestedByEmail</td>
+                                <td>@r.RequestedAt.ToLocalTime().ToString("g")</td>
+                                <td>
+                                    <span class="badge @(r.Status == "Pending" ? "bg-warning text-dark" : r.Status == "Approved" ? "bg-success" : "bg-danger")">
+                                        @r.Status
+                                    </span>
+                                </td>
+                                <td>
+                                    @if (r.Status == "Pending")
+                                    {
+                                        <button class="btn btn-sm btn-success me-1" @onclick="() => ApproveRequest(r.Id)">Approve</button>
+                                        <button class="btn btn-sm btn-danger" @onclick="() => RejectRequest(r.Id)">Reject</button>
+                                    }
+                                    else
+                                    {
+                                        <small>Reviewed by: @r.ReviewedByEmail<br/>@r.ReviewedAt?.ToLocalTime().ToString("g")</small>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+</AuthorizeView>
+
+@code {
+    // Products (warehouse)
+    private List<ProductViewModel>? allProducts;
+    private IEnumerable<ProductViewModel> productsPage = Array.Empty<ProductViewModel>();
+    private string? searchName;
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private int totalPages = 1;
+
+    public class ProductViewModel
+    {
+        public int Id { get; set; }
+        public string? Name { get; set; }
+        public int StockQuantity { get; set; }
+        public int PhysicalCount { get; set; }
+    }
+
+    // Admin: requests
+    private List<InventoryAdjustmentRequest>? requests;
+    private string? adminFilterStatus;
+    private string? adminSearch;
+
+    // Current user info
+    private ClaimsPrincipal? currentUser;
+    private bool isAdmin = false;
+    private bool isWarehouse = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        currentUser = auth.User;
+        isAdmin = currentUser?.IsInRole("Admin") == true;
+        isWarehouse = currentUser?.IsInRole("Warehouse") == true;
+
+        await LoadProducts();
+        if (isAdmin)
+        {
+            await LoadRequests();
+        }
+    }
+
+    #region Products load / pagination
+    private async Task LoadProducts()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        IQueryable<Product> q = db.Products.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(searchName))
+        {
+            var s = searchName.Trim();
+            q = q.Where(p => EF.Functions.Like(p.Name, $"%{s}%"));
+        }
+
+        var productsFromDb = await q.OrderBy(p => p.Name).ToListAsync();
+
+        allProducts = productsFromDb.Select(p => new ProductViewModel
+        {
+            Id = p.Id,
+            Name = p.Name,
+            StockQuantity = p.StockQuantity,
+            PhysicalCount = p.StockQuantity
+        }).ToList();
+
+        totalPages = (int)Math.Ceiling((double)allProducts.Count / pageSize);
+        totalPages = Math.Max(1, totalPages);
+        currentPage = Math.Clamp(currentPage, 1, totalPages);
+
+        productsPage = allProducts
+            .Skip((currentPage - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+    }
+
+    private async Task SearchProducts()
+    {
+        currentPage = 1;
+        await LoadProducts();
+    }
+
+    private async Task ClearSearch()
+    {
+        searchName = null;
+        currentPage = 1;
+        await LoadProducts();
+    }
+
+    private async Task ChangePage(int page)
+    {
+        currentPage = Math.Clamp(page, 1, totalPages);
+        await LoadProducts();
+    }
+    #endregion
+
+    #region Warehouse: Request adjustment
+    private async Task RequestAdjustment(ProductViewModel pvm)
+    {
+        if (!isWarehouse && !isAdmin)
+        {
+            ToastSvc.ShowToast("Bạn không có quyền thực hiện thao tác này.", ToastLevel.Warning);
+            return;
+        }
+
+        if (pvm.PhysicalCount < 0)
+        {
+            ToastSvc.ShowToast("Số lượng thực tế không thể nhỏ hơn 0.", ToastLevel.Error);
+            return;
+        }
+
+        if (pvm.PhysicalCount == pvm.StockQuantity)
+        {
+            ToastSvc.ShowToast("Số lượng thực tế không khác so với hệ thống.", ToastLevel.Info);
+            return;
+        }
+
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Bạn có chắc muốn gửi yêu cầu điều chỉnh tồn của '{pvm.Name}' từ {pvm.StockQuantity} → {pvm.PhysicalCount} ?");
+
+        if (!ok) return;
+
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = auth.User;
+        var uid = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var email = user.Identity?.Name;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        try
+        {
+            var request = new InventoryAdjustmentRequest
+            {
+                ProductId = pvm.Id,
+                ProductName = pvm.Name,
+                OldQuantity = pvm.StockQuantity,
+                RequestedQuantity = pvm.PhysicalCount,
+                Status = "Pending",
+                RequestedAt = DateTime.UtcNow,
+                RequestedByUserId = uid,
+                RequestedByEmail = email
+            };
+
+            db.InventoryAdjustmentRequests.Add(request);
+            await db.SaveChangesAsync();
+
+            ToastSvc.ShowToast("✅ Đã gửi yêu cầu điều chỉnh. Vui lòng chờ Admin phê duyệt.", ToastLevel.Success);
+
+            // Reload requests for admin and keep product list fresh
+            if (isAdmin) await LoadRequests();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[StockTake] RequestAdjustment error: " + ex);
+            ToastSvc.ShowToast("Đã có lỗi khi gửi yêu cầu. Vui lòng thử lại.", ToastLevel.Error);
+        }
+    }
+    #endregion
+
+    #region Admin: requests load / approve / reject
+    private async Task LoadRequests()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        IQueryable<InventoryAdjustmentRequest> q = db.InventoryAdjustmentRequests.AsNoTracking().OrderByDescending(r => r.RequestedAt);
+
+        if (!string.IsNullOrWhiteSpace(adminFilterStatus))
+            q = q.Where(r => r.Status == adminFilterStatus);
+
+        if (!string.IsNullOrWhiteSpace(adminSearch))
+        {
+            var s = adminSearch.Trim();
+            if (int.TryParse(s, out int idsearch))
+                q = q.Where(r => r.Id == idsearch || EF.Functions.Like(r.ProductName, $"%{s}%"));
+            else
+                q = q.Where(r => EF.Functions.Like(r.ProductName, $"%{s}%") || EF.Functions.Like(r.RequestedByEmail, $"%{s}%"));
+        }
+
+        requests = await q.ToListAsync();
+    }
+
+    private async Task ApproveRequest(int requestId)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", $"Bạn có chắc muốn phê duyệt yêu cầu #{requestId}? Việc này sẽ cập nhật tồn kho.");
+        if (!ok) return;
+
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = auth.User;
+        var reviewerId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var reviewerEmail = user.Identity?.Name;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        await using var tx = await db.Database.BeginTransactionAsync();
+        try
+        {
+            var req = await db.InventoryAdjustmentRequests.FirstOrDefaultAsync(r => r.Id == requestId);
+            if (req == null)
+            {
+                ToastSvc.ShowToast("Không tìm thấy yêu cầu.", ToastLevel.Warning);
+                return;
+            }
+            if (req.Status != "Pending")
+            {
+                ToastSvc.ShowToast("Yêu cầu đã được xử lý.", ToastLevel.Info);
+                return;
+            }
+
+            var prod = await db.Products.FirstOrDefaultAsync(p => p.Id == req.ProductId);
+            if (prod == null)
+            {
+                ToastSvc.ShowToast("Sản phẩm không tồn tại.", ToastLevel.Error);
+                return;
+            }
+
+            int oldQty = prod.StockQuantity;
+            int newQty = req.RequestedQuantity;
+            int change = newQty - oldQty;
+
+            // Update product
+            prod.StockQuantity = newQty;
+            db.Products.Update(prod);
+
+            // Try to add InventoryLog if table exists
+            try
+            {
+                var log = new InventoryLog
+                {
+                    ProductId = prod.Id,
+                    QuantityChange = change,
+                    NewQuantity = prod.StockQuantity,
+                    Reason = $"Phê duyệt điều chỉnh (Request #{req.Id})",
+                    Timestamp = DateTime.Now
+                };
+                await db.InventoryLogs.AddAsync(log);
+            }
+            catch { /* ignore if InventoryLog model/table missing */ }
+
+            // Update request
+            req.Status = "Approved";
+            req.ReviewedAt = DateTime.UtcNow;
+            req.ReviewedByUserId = reviewerId;
+            req.ReviewedByEmail = reviewerEmail;
+            req.ReviewComment = "Approved";
+            db.InventoryAdjustmentRequests.Update(req);
+
+            await db.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            ToastSvc.ShowToast($"✅ Đã phê duyệt yêu cầu #{req.Id} và cập nhật tồn ({oldQty} → {newQty}).", ToastLevel.Success);
+
+            // reload data
+            await LoadRequests();
+            await LoadProducts();
+        }
+        catch (Exception ex)
+        {
+            try { await tx.RollbackAsync(); } catch { }
+            Console.WriteLine("[StockTake] Approve error: " + ex);
+            ToastSvc.ShowToast("Có lỗi khi phê duyệt. Vui lòng thử lại.", ToastLevel.Error);
+        }
+    }
+
+    private async Task RejectRequest(int requestId)
+    {
+        // Prompt for a reason (optional)
+        string? comment = null;
+        try
+        {
+            comment = await JS.InvokeAsync<string>("prompt", $"Nhập lý do từ chối cho request #{requestId} (bỏ trống nếu không):");
+        }
+        catch { comment = null; }
+
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = auth.User;
+        var reviewerId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var reviewerEmail = user.Identity?.Name;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        try
+        {
+            var req = await db.InventoryAdjustmentRequests.FirstOrDefaultAsync(r => r.Id == requestId);
+            if (req == null)
+            {
+                ToastSvc.ShowToast("Không tìm thấy yêu cầu.", ToastLevel.Warning);
+                return;
+            }
+            if (req.Status != "Pending")
+            {
+                ToastSvc.ShowToast("Yêu cầu đã được xử lý.", ToastLevel.Info);
+                return;
+            }
+
+            req.Status = "Rejected";
+            req.ReviewedAt = DateTime.UtcNow;
+            req.ReviewedByUserId = reviewerId;
+            req.ReviewedByEmail = reviewerEmail;
+            req.ReviewComment = string.IsNullOrWhiteSpace(comment) ? "Rejected by admin" : comment;
+            db.InventoryAdjustmentRequests.Update(req);
+            await db.SaveChangesAsync();
+
+            ToastSvc.ShowToast($"Đã từ chối yêu cầu #{req.Id}.", ToastLevel.Info);
+
+            await LoadRequests();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[StockTake] Reject error: " + ex);
+            ToastSvc.ShowToast("Có lỗi khi từ chối yêu cầu. Vui lòng thử lại.", ToastLevel.Error);
+        }
+    }
+    #endregion
+}

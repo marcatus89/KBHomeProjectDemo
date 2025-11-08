@@ -1,0 +1,598 @@
+@import url('open-iconic/font/css/open-iconic-bootstrap.min.css');
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap');
+
+:root {
+    --primary-color: #1A2A4C; /* Xanh Navy đậm */
+    --accent-color: #D4AF37; /* Vàng Gold */
+    --dark-color: #212529;
+    --light-gray-color: #f8f9fa;
+    --text-color: #333;
+    --light-text-color: #adb5bd;
+}
+
+html, body {
+    font-family: 'Montserrat', sans-serif;
+    color: var(--text-color);
+    font-weight: 400; 
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-weight: 600; 
+}
+
+a {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+a:hover {
+    color: #121d35;
+}
+
+.btn-primary {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+.btn-primary:hover {
+    background-color: #121d35;
+    border-color: #121d35;
+}
+
+/* Cấu trúc Layout chính */
+.app-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+.main-content {
+    flex: 1;
+    background-color: #ffffff; 
+}
+
+/* Header */
+.app-header {
+    background-color: #ffffff;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    position: sticky;
+    top: 0;
+    z-index: 1020;
+}
+
+.header-top {
+    background-color: var(--light-gray-color);
+    padding: 8px 0;
+    font-size: 13px;
+    color: #555;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.header-top .container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.header-main {
+    padding: 15px 0;
+}
+
+.header-main .container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.header-logo img {
+    height: 90px; 
+}
+
+.header-search {
+    flex-grow: 1;
+    margin: 0 40px;
+}
+
+.header-actions .action-item {
+    text-decoration: none;
+    color: #333;
+    margin-left: 20px;
+    font-weight: 500;
+}
+
+.header-actions .oi {
+    font-size: 20px;
+    vertical-align: middle;
+    margin-right: 5px;
+}
+
+.header-nav {
+    background-color: var(--dark-color);
+}
+
+.header-nav .nav-menu-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+}
+
+.header-nav .nav-menu-list li .nav-link {
+    display: block;
+    padding: 15px 20px;
+    color: #f8f9fa;
+    text-decoration: none;
+    font-weight: 500;
+    transition: background-color 0.3s;
+    border-bottom: 3px solid transparent;
+}
+
+.header-nav .nav-menu-list li .nav-link:hover {
+    background-color: #495057;
+    color: #fff;
+}
+
+.header-nav .nav-menu-list li .nav-link.active {
+    color: #fff;
+    border-bottom: 3px solid var(--accent-color);
+}
+
+/* Dropdown Menu */
+.dropdown {
+    position: relative;
+}
+
+.dropdown-content {
+    display: none;
+    position: absolute;
+    background-color: #ffffff;
+    min-width: 220px;
+    box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.1);
+    z-index: 1;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.dropdown-content a {
+    color: #333;
+    padding: 12px 16px;
+    text-decoration: none;
+    display: block;
+    font-weight: 500;
+}
+
+.dropdown-content a:hover {
+    background-color: #f1f1f1;
+}
+
+.dropdown:hover .dropdown-content {
+    display: block;
+}
+
+/* --- STYLING FOR PROFESSIONAL HOMEPAGE --- */
+.section-title {
+    text-align: center;
+    margin-bottom: 20px;
+    font-size: 2.2rem;
+    font-weight: 600;
+}
+
+.section-divider {
+    margin: 0 auto 50px auto;
+    width: 80px;
+    border-top: 3px solid var(--primary-color);
+    opacity: 1;
+}
+
+/* ===== HERO SLIDER REFINED STYLE ===== */
+#heroCarousel {
+    width: 100%;
+    height: 100vh; /* ✅ Full màn hình, có thể đổi 80vh nếu muốn nhỏ hơn */
+    position: relative;
+    overflow: hidden;
+}
+
+#heroCarousel .carousel-inner {
+    width: 100%;
+    height: 100%;
+}
+
+#heroCarousel .carousel-item {
+    width: 100%;
+    height: 100%;
+}
+
+#heroCarousel .carousel-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;      /* ✅ hình phủ khung */
+    object-position: center center; /* ✅ căn giữa */
+    display: block;
+}
+
+/* Đảm bảo caption nổi lên trên ảnh */
+#heroCarousel .carousel-caption {
+    position: absolute;
+    top: 50%;
+    left: 10%;
+    transform: translateY(-50%);
+    z-index: 2;
+    color: white;
+}
+
+#heroCarousel .carousel-caption h1 {
+    font-size: 3.6rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    line-height: 1.2;
+    text-shadow: 2px 3px 8px rgba(245, 210, 210, 0.4);
+}
+
+#heroCarousel .carousel-caption p {
+    font-size: 1.2rem;
+    font-weight: 300;
+    color: rgba(255, 255, 255, 0.85);
+    margin-bottom: 1.5rem;
+}
+
+#heroCarousel .carousel-caption .btn-light {
+    border: 2px solid var(--accent-color);
+    color: var(--accent-color);
+    background-color: transparent;
+    padding: 12px 32px;
+    border-radius: 50px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+#heroCarousel .carousel-caption .btn-light:hover {
+    background-color: var(--accent-color);
+    color: var(--primary-color);
+}
+
+#heroCarousel .carousel-indicators button {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin: 0 6px;
+    background-color: #fff;
+    opacity: 0.6;
+    transition: opacity 0.3s ease;
+}
+
+#heroCarousel .carousel-indicators .active {
+    opacity: 1;
+    background-color: var(--accent-color);
+}
+
+#heroCarousel .carousel-control-prev,
+#heroCarousel .carousel-control-next {
+    width: 55px;
+    height: 55px;
+    background-color: rgba(255, 255, 255, 0.25);
+    border-radius: 50%;
+    transition: all 0.3s ease;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+#heroCarousel .carousel-control-prev:hover,
+#heroCarousel .carousel-control-next:hover {
+    background-color: rgba(212, 175, 55, 0.6);
+}
+/* --- END SLIDER STYLES --- */
+
+
+/* Collection / Category Section */
+.collection-section {
+    padding: 80px 0;
+}
+
+.collection-card {
+    display: block;
+    position: relative;
+    border-radius: 8px;
+    overflow: hidden;
+    height: 350px;
+    color: white;
+}
+
+.collection-card img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.4s ease;
+}
+
+.collection-card:hover img {
+    transform: scale(1.05);
+}
+
+.collection-card-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 20px;
+    background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+    text-align: center;
+}
+
+.collection-card-overlay h3 {
+    font-size: 1.5rem;
+    text-shadow: 1px 1px 3px rgba(0,0,0,0.7);
+}
+
+
+/* Latest Products Section */
+.latest-products-section {
+    padding: 80px 0;
+    background-color: var(--light-gray-color);
+}
+
+.product-card {
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    overflow: hidden;
+    transition: transform 0.3s, box-shadow 0.3s;
+    background-color: #fff;
+}
+
+.product-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+}
+
+.product-card .card-img-top {
+    height: 250px; 
+    object-fit: cover;
+}
+
+.product-card .card-body a {
+    text-decoration: none;
+    color: var(--dark-color);
+}
+.product-card .card-body h6.price-tag {
+    color: var(--accent-color); 
+    font-weight: 600;
+}
+
+
+/* Projects Section */
+.projects-section {
+    padding: 80px 0;
+    background-color: #ffffff;
+}
+
+.project-card {
+    position: relative;
+    border-radius: 8px;
+    overflow: hidden;
+    height: 300px;
+}
+
+.project-card img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.4s;
+}
+
+.project-card:hover img {
+    transform: scale(1.05);
+}
+
+.project-card-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+    color: #fff;
+    padding: 20px;
+}
+
+/* About Us Section */
+.about-us-section {
+    padding: 80px 0;
+    background-color: var(--light-gray-color);
+}
+
+.about-us-section .img-fluid {
+    height: 250px;
+    width: 100%;
+    object-fit: cover;
+}
+
+/* News Section */
+.news-section {
+    padding: 80px 0;
+}
+
+.news-card-main {
+    position: relative;
+    border-radius: 8px;
+    overflow: hidden;
+    color: white;
+}
+
+.news-card-main img {
+    width: 100%;
+    height: 400px;
+    object-fit: cover;
+}
+
+.news-card-content {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 20px;
+    background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
+}
+.news-category {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 4px 8px;
+    font-size: 12px;
+    border-radius: 4px;
+    text-transform: uppercase;
+}
+
+.news-list-item {
+    display: flex;
+    margin-bottom: 20px;
+}
+
+.news-list-item img {
+    width: 100px;
+    height: 80px;
+    object-fit: cover;
+    border-radius: 4px;
+    margin-right: 15px;
+}
+
+.news-list-item h6 {
+    font-size: 1rem;
+    margin-bottom: 5px;
+}
+.news-list-item span {
+    font-size: 13px;
+    color: #888;
+}
+
+
+
+.partners-section {
+    padding: 80px 0;
+    background-color: #ffffff;
+}
+
+.partner-logos {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.partner-logos img {
+    height: 190px;
+    margin: 15px;
+    filter: grayscale(100%);
+    opacity: 0.6;
+    transition: all 0.3s;
+}
+
+.partner-logos img:hover {
+    filter: grayscale(0%);
+    opacity: 1;
+}
+
+
+.app-footer {
+    background-color: var(--dark-color); 
+    color: var(--light-text-color);
+    padding: 40px 0 20px 0;
+}
+
+.app-footer h5 {
+    color: #fff;
+    margin-bottom: 20px;
+}
+
+.app-footer p, .app-footer ul li a {
+    font-size: 14px;
+    color: var(--light-text-color);
+    text-decoration: none;
+}
+
+.app-footer ul {
+    list-style: none;
+    padding: 0;
+}
+
+.app-footer ul li {
+    margin-bottom: 8px;
+}
+
+.app-footer ul li a:hover {
+    color: #fff;
+}
+
+.footer-bottom {
+    border-top: 1px solid #495057;
+    text-align: center;
+    padding-top: 20px;
+    margin-top: 20px;
+    font-size: 13px;
+}
+
+/* --- Final Print Styles --- */
+.invoice-logo {
+    height: 60px; 
+    width: auto;
+}
+
+@media print {
+   
+    body * {
+        visibility: hidden;
+    }
+
+    
+    #printable-area, #printable-area * {
+        visibility: visible;
+    }
+
+    
+    #printable-area {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+    }
+}
+
+
+#nprogress .bar {
+  background: var(--accent-color) !important;
+  height: 3px !important;
+}
+#nprogress .peg {
+  box-shadow: 0 0 10px var(--accent-color), 0 0 5px var(--accent-color) !important;
+}
+#nprogress .spinner-icon {
+  border-top-color: var(--accent-color) !important;
+  border-left-color: var(--accent-color) !important;
+}
+/* ===== Toast Hiển Thị Chuẩn Dưới Header ===== */
+.toast-container {
+    position: fixed !important;
+    top: 130px; /* Dịch xuống dưới header (có thể điều chỉnh 100–140px) */
+    right: 20px;
+    z-index: 4000;
+    max-width: 350px; /* Giới hạn chiều rộng Toast */
+    word-wrap: break-word;
+    pointer-events: auto;
+}
+
+/* Hiệu ứng mượt */
+.toast {
+    opacity: 0;
+    transform: translateY(-10px);
+    transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* Responsive cho mobile */
+@media (max-width: 768px) {
+    .toast-container {
+        top: 100px;
+        right: 10px;
+        left: 10px;
+        max-width: none;
+    }
+}
+

@@ -1,0 +1,238 @@
+@page "/gio-hang"
+@using System.Linq
+@using DoAnTotNghiep.Models
+@using Microsoft.EntityFrameworkCore
+@inject CartService CartSvc
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ToastService ToastSvc
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+@implements IDisposable
+
+<style>
+  .cart-image {
+    width: 96px;
+    height: 72px;
+    object-fit: cover;
+    border-radius: 6px;
+  }
+  .cart-item-row { vertical-align: middle; }
+  .cart-summary { max-width: 420px; }
+  .empty-cart {
+    text-align:center;
+    padding: 40px 20px;
+  }
+  .qty-controls .btn { min-width:38px; }
+  .muted-small { font-size: .9rem; color: #6c757d; }
+</style>
+
+<h3>Giỏ hàng</h3>
+
+@if (!CartSvc.Items.Any())
+{
+    <div class="empty-cart">
+        <img src="/images/empty-cart.png" alt="Giỏ hàng trống" style="max-width:200px; opacity:.7" />
+        <h5 class="mt-3">Giỏ hàng trống</h5>
+        <p class="text-muted">Bạn chưa thêm sản phẩm nào vào giỏ.</p>
+        <a class="btn btn-primary" href="/san-pham">Tiếp tục mua sắm</a>
+    </div>
+}
+else
+{
+    <div class="row">
+        <div class="col-lg-8">
+            <div class="card mb-3">
+                <div class="card-body p-0">
+                    <table class="table mb-0 align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Sản phẩm</th>
+                                <th class="text-center" style="width:120px">Số lượng</th>
+                                <th class="text-end" style="width:140px">Đơn giá</th>
+                                <th class="text-end" style="width:140px">Tạm tính</th>
+                                <th style="width:120px"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in CartSvc.Items)
+                            {
+                                var prod = products.ContainsKey(item.ProductId) ? products[item.ProductId] : null;
+                                <tr class="cart-item-row">
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <img src="@(prod?.ImageUrl ?? "/images/no-image.png")" class="cart-image me-3" alt="@item.ProductName" />
+                                            <div>
+                                                <div class="fw-semibold">@item.ProductName</div>
+                                                <div class="muted-small">Mã: @item.ProductId</div>
+                                            </div>
+                                        </div>
+                                    </td>
+
+                                    <td class="text-center">
+                                        <div class="d-flex justify-content-center align-items-center qty-controls">
+                                            <button class="btn btn-outline-secondary btn-sm me-2" @onclick="@(()=>DecreaseQty(item.ProductId))" disabled="@(item.Quantity <= 1)">−</button>
+                                            <InputNumber class="form-control text-center" style="width:70px" TValue="int" @bind-Value="@item.Quantity" @onchange="@(async e => await OnQuantityChanged(item.ProductId, item.Quantity))" />
+                                            <button class="btn btn-outline-secondary btn-sm ms-2" @onclick="@(()=>IncreaseQty(item.ProductId))">+</button>
+                                        </div>
+                                    </td>
+
+                                    <td class="text-end">@(@item.Price.ToString("n0")) VNĐ</td>
+                                    <td class="text-end">@((item.Price * item.Quantity).ToString("n0")) VNĐ</td>
+
+                                    <td class="text-end">
+                                        <button class="btn btn-sm btn-danger" @onclick="() => RemoveItem(item.ProductId)">
+                                            <i class="bi bi-trash"></i> Xóa
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <div>
+                    <button class="btn btn-outline-secondary me-2" @onclick="ClearCartConfirmed">Xóa toàn bộ</button>
+                    <a class="btn btn-link" href="/san-pham">Tiếp tục mua sắm</a>
+                </div>
+
+                <div class="muted-small text-end">
+                    <div>Phương thức thanh toán và giao hàng khi xác nhận đơn</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="card cart-summary">
+                <div class="card-body">
+                    <h5 class="card-title">Tóm tắt đơn hàng</h5>
+
+                    <div class="d-flex justify-content-between">
+                        <div>Tạm tính</div>
+                        <div class="fw-semibold">@((CartSvc.Total).ToString("n0")) VNĐ</div>
+                    </div>
+
+                    <div class="d-flex justify-content-between mt-2">
+                        <div>Phí vận chuyển</div>
+                        <div class="fw-semibold">0 VNĐ</div>
+                    </div>
+
+                    <hr />
+
+                    <div class="d-flex justify-content-between">
+                        <div class="h5">Tổng</div>
+                        <div class="h5">@((CartSvc.Total).ToString("n0")) VNĐ</div>
+                    </div>
+
+                    <div class="mt-3">
+                        <!-- CHỈ CHUYỂN SANG CHECKOUT, KHÔNG XÓA GIỎ -->
+                        <button class="btn btn-success w-100" @onclick="ProceedToCheckout">Thanh toán</button>
+                    </div>
+
+                    <div class="mt-2 text-center">
+                        <small class="text-muted">Bạn có thể chỉnh số lượng trước khi thanh toán.</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    // Cached products info for images / extra display
+    private Dictionary<int, Product> products = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        CartSvc.OnChange += CartChanged;
+        await LoadProductsAsync();
+    }
+
+    private void CartChanged()
+    {
+        // reload product infos as product ids may change
+        _ = InvokeAsync(async () =>
+        {
+            await LoadProductsAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async Task LoadProductsAsync()
+    {
+        try
+        {
+            var ids = CartSvc.Items.Select(i => i.ProductId).Distinct().ToArray();
+            if (!ids.Any())
+            {
+                products.Clear();
+                return;
+            }
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var list = await db.Products.Where(p => ids.Contains(p.Id)).AsNoTracking().ToListAsync();
+            products = list.ToDictionary(p => p.Id, p => p);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[ShoppingCart] LoadProductsAsync error: " + ex);
+        }
+    }
+
+    private async Task OnQuantityChanged(int productId, int newQty)
+    {
+        if (newQty <= 0)
+        {
+            // remove if user enters 0
+            CartSvc.RemoveFromCart(productId);
+        }
+        else
+        {
+            CartSvc.UpdateQuantity(productId, newQty);
+        }
+        await LoadProductsAsync();
+        StateHasChanged();
+    }
+
+    private void IncreaseQty(int productId)
+    {
+        var item = CartSvc.Items.FirstOrDefault(i => i.ProductId == productId);
+        if (item == null) return;
+        CartSvc.UpdateQuantity(productId, item.Quantity + 1);
+    }
+
+    private void DecreaseQty(int productId)
+    {
+        var item = CartSvc.Items.FirstOrDefault(i => i.ProductId == productId);
+        if (item == null) return;
+        if (item.Quantity <= 1) return;
+        CartSvc.UpdateQuantity(productId, item.Quantity - 1);
+    }
+
+    private void RemoveItem(int productId)
+    {
+        CartSvc.RemoveFromCart(productId);
+    }
+
+    private async Task ClearCartConfirmed()
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", "Bạn có chắc muốn xóa toàn bộ giỏ hàng?");
+        if (!ok) return;
+        CartSvc.ClearCart();
+        await LoadProductsAsync();
+        ToastSvc.ShowToast("Đã xóa toàn bộ giỏ hàng.", ToastLevel.Success);
+    }
+
+    private void ProceedToCheckout()
+    {
+        // chỉ chuyển sang trang thanh toán, không xóa giỏ hàng
+        Navigation.NavigateTo("/thanh-toan");
+    }
+
+    public void Dispose()
+    {
+        CartSvc.OnChange -= CartChanged;
+    }
+}

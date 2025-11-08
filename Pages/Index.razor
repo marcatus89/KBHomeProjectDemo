@@ -1,0 +1,210 @@
+﻿@page "/"
+@using Microsoft.EntityFrameworkCore
+@using DoAnTotNghiep.Data
+@using DoAnTotNghiep.Models
+@using Microsoft.Extensions.DependencyInjection
+@inject IServiceScopeFactory ScopeFactory
+
+<div class="homepage-container">
+    <HeroSlider />
+
+    @if (isLoading)
+    {
+        <LoadingSpinner />
+    }
+    else if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="container">
+            <div class="alert alert-danger">@errorMessage</div>
+        </div>
+    }
+    else
+    {
+        @if (categories != null && categories.Any())
+        {
+            <div class="container collection-section">
+                <h2 class="section-title">Bộ Sưu Tập</h2>
+                <hr class="section-divider" />
+                <div class="row">
+                    @foreach (var category in categories.Take(4))
+                    {
+                        <div class="col-6 col-md-3 mb-4">
+                            <a href="@($"/category/{category.Id}")" class="collection-card">
+                                <img src="@($"/images/category-{category.Id}.jpg")" alt="@category.Name" />
+                                <div class="collection-card-overlay">
+                                    <h3>@category.Name</h3>
+                                </div>
+                            </a>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <div class="container latest-products-section">
+            <h2 class="section-title">Top Sản phẩm Nổi bật</h2>
+            <hr class="section-divider" />
+
+            @if (featuredProducts == null || !featuredProducts.Any())
+            {
+                <LoadingSpinner />
+            }
+            else
+            {
+                <div class="row">
+                    @foreach (var product in featuredProducts)
+                    {
+                        <div class="col-lg-3 col-md-6 mb-4">
+                            <div class="card h-100 product-card">
+                                <a href="@($"/san-pham/{product.Id}")">
+                                    <img class="card-img-top" src="@product.ImageUrl" alt="@product.Name">
+                                </a>
+                                <div class="card-body text-center">
+                                    <h5 class="card-title">
+                                        <a href="@($"/san-pham/{product.Id}")">@product.Name</a>
+                                    </h5>
+                                    <h6>@product.Price.ToString("n0") VNĐ</h6>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+
+        <div class="container projects-section">
+            <h2 class="section-title">Dự án Tiêu biểu</h2>
+            <hr class="section-divider" />
+            <div class="row">
+                <div class="col-md-6 mb-4">
+                    <div class="project-card">
+                        <img src="/images/project-1.jpg" alt="Dự án Biệt thự VinHomes" />
+                        <div class="project-card-overlay">
+                            <h5>Biệt thự VinHomes Riverside</h5>
+                            <p>Giải pháp phòng tắm Master sang trọng</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6 mb-4">
+                    <div class="project-card">
+                        <img src="/images/project-2.jpg" alt="Dự án Căn hộ Empire City" />
+                        <div class="project-card-overlay">
+                            <h5>Căn hộ Empire City</h5>
+                            <p>Tối ưu không gian với thiết bị thông minh</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="container news-section">
+            <h2 class="section-title">Tin tức & Tư vấn</h2>
+            <hr class="section-divider" />
+            <div class="row">
+                <div class="col-md-6 mb-4">
+                    <div class="news-card-main">
+                        <img src="/images/news-1.jpg" alt="Tin tức chính" />
+                        <div class="news-card-content">
+                            <span class="news-category">Tư vấn</span>
+                            <h5>5 Xu hướng thiết kế phòng tắm dẫn đầu năm 2025</h5>
+                            <p>Khám phá những ý tưởng đột phá...</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6 mb-4">
+                    <div class="news-list">
+                        <div class="news-list-item">
+                            <img src="/images/news-2.jpg" alt="Tin tức phụ 1" />
+                            <div>
+                                <h6>Lựa chọn vòi sen thông minh</h6>
+                                <span>8 Tháng 9, 2025</span>
+                            </div>
+                        </div>
+                        <div class="news-list-item">
+                            <img src="/images/news-3.jpg" alt="Tin tức phụ 2" />
+                            <div>
+                                <h6>Mẹo giữ cho thiết bị vệ sinh luôn sáng bóng</h6>
+                                <span>5 Tháng 9, 2025</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="container about-us-section">
+            <h2 class="section-title">About KBHOME</h2>
+            <div class="container text-center">
+                <p>Lắng nghe - Tối giản - Tận tâm</p>
+            </div>
+            <hr class="section-divider" />
+            <div class="row">
+                <div class="col-md-4 mb-4">
+                    <img src="/images/about-1.jpg" class="img-fluid rounded" alt="Hoạt động công ty 1" />
+                </div>
+                <div class="col-md-4 mb-4">
+                    <img src="/images/about-2.jpg" class="img-fluid rounded" alt="Hoạt động công ty 2" />
+                </div>
+                <div class="col-md-4 mb-4">
+                    <img src="/images/about-3.jpg" class="img-fluid rounded" alt="Hoạt động công ty 3" />
+                </div>
+            </div>
+        </div>
+
+        <div class="container partners-section">
+            <h2 class="section-title">Thương hiệu & Đối tác</h2>
+            <hr class="section-divider" />
+            <div class="partner-logos">
+                <img src="/images/brand-1.png" alt="Brand Logo 1" />
+                <img src="/images/brand-2.png" alt="Brand Logo 2" />
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private List<Product>? featuredProducts;
+    private List<Category>? categories;
+    private bool isLoading = true;
+    private string? errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        isLoading = true;
+        errorMessage = null;
+
+        // Create two separate scopes so each query uses its own ApplicationDbContext instance
+        using var scopeProducts = ScopeFactory.CreateScope();
+        using var scopeCategories = ScopeFactory.CreateScope();
+
+        var ctxProducts = scopeProducts.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var ctxCategories = scopeCategories.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        try
+        {
+            var productsTask = ctxProducts.Products
+                .Where(p => p.IsVisible)
+                .OrderByDescending(p => p.Id)
+                .Take(4)
+                .ToListAsync();
+
+            var categoriesTask = ctxCategories.Categories
+                .OrderBy(c => c.Name)
+                .ToListAsync();
+
+            await Task.WhenAll(productsTask, categoriesTask);
+
+            featuredProducts = productsTask.Result;
+            categories = categoriesTask.Result;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "Đã xảy ra lỗi khi tải dữ liệu: " + ex.Message;
+        }
+        finally
+        {
+            // scopes are disposed automatically
+            isLoading = false;
+        }
+    }
+}

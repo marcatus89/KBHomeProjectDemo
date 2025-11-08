@@ -1,0 +1,146 @@
+@page "/products"
+@page "/products/page/{PageNumber:int}"
+@page "/san-pham"
+@page "/san-pham/page/{PageNumber:int}"
+
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<div class="container-fluid">
+    <h2 class="section-title">Tất cả Sản phẩm</h2>
+    <hr class="section-divider" />
+
+    <FilterControls SortChanged="ApplySort" InitialSort="@currentSort" />
+
+    @if (pagedProducts == null)
+    {
+        <LoadingSpinner />
+    }
+    else
+    {
+        <div class="row">
+            @foreach (var product in pagedProducts)
+            {
+                <div class="col-lg-4 col-md-6 mb-4">
+                    <div class="card h-100 product-card">
+                        <a href="@($"/san-pham/{product.Id}")">
+                            <img class="card-img-top" src="@product.ImageUrl" alt="@product.Name">
+                        </a>
+                        <div class="card-body text-center">
+                            <h5 class="card-title">
+                                <a href="@($"/san-pham/{product.Id}")">@product.Name</a>
+                            </h5>
+                            <h6 class="price-tag">@product.Price.ToString("n0") VNĐ</h6>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <nav aria-label="Page navigation">
+            <ul class="pagination justify-content-center">
+                <li class="page-item @(currentPage == 1 ? "disabled" : "")">
+                    <a class="page-link" href="@($"/products/page/{Math.Max(currentPage - 1, 1)}")">Trước</a>
+                </li>
+                @for (int i = 1; i <= totalPages; i++)
+                {
+                    var pageNum = i;
+                    <li class="page-item @(currentPage == pageNum ? "active" : "")">
+                        <a class="page-link" href="@($"/products/page/{pageNum}")">@pageNum</a>
+                    </li>
+                }
+                <li class="page-item @(currentPage == totalPages ? "disabled" : "")">
+                    <a class="page-link" href="@($"/products/page/{Math.Min(currentPage + 1, totalPages)}")">Sau</a>
+                </li>
+            </ul>
+        </nav>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public int PageNumber { get; set; } = 1;
+
+    private List<Product>? pagedProducts;
+    private int currentPage = 1;
+    private int totalPages = 1;
+    private int pageSize = 6;
+    private string currentSort = "default";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        Console.WriteLine($"OnParametersSetAsync called. PageNumber={PageNumber}, currentSort={currentSort}");
+        await LoadProducts();
+    }
+
+    private async Task LoadProducts()
+    {
+        currentPage = PageNumber < 1 ? 1 : PageNumber;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        // Build query
+        var query = db.Products
+            .Where(p => p.IsVisible)
+            .AsQueryable();
+
+        var sort = (currentSort ?? "default").ToLowerInvariant();
+
+        switch (sort)
+        {
+            case "price_asc":
+                query = query.OrderBy(p => p.Price);
+                break;
+            case "price_desc":
+                query = query.OrderByDescending(p => p.Price);
+                break;
+            default:
+                query = query.OrderByDescending(p => p.Id);
+                break;
+        }
+
+        // DEBUG: in ra SQL được EF tạo
+        try
+        {
+            var sql = query.ToQueryString();
+            Console.WriteLine("Generated SQL:");
+            Console.WriteLine(sql);
+        }
+        catch (Exception ex)
+        {
+            // ToQueryString() có mặt nếu dùng EF Core relational
+            Console.WriteLine("ToQueryString failed: " + ex.Message);
+        }
+
+        // Count and page
+        var totalProducts = await query.CountAsync();
+        Console.WriteLine($"totalProducts = {totalProducts}");
+
+        totalPages = (int)Math.Ceiling(totalProducts / (double)pageSize);
+
+        pagedProducts = await query
+            .Skip((currentPage - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+
+        // DEBUG: in 5 item để kiểm tra thứ tự
+        Console.WriteLine("Top items on current page (Price):");
+        foreach (var p in pagedProducts.Take(5))
+        {
+            Console.WriteLine($"Id={p.Id}, Name={p.Name}, Price={p.Price}");
+        }
+    }
+
+    private async Task ApplySort(string sort)
+    {
+        Console.WriteLine($"ApplySort called: '{sort}'");
+        currentSort = sort ?? "default";
+
+        // reset về trang đầu khi đổi sort
+        currentPage = 1;
+        PageNumber = 1;
+
+        await LoadProducts();
+        StateHasChanged();
+    }
+}

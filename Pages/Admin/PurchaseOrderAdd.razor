@@ -1,0 +1,117 @@
+@page "/admin/purchase-orders/add"
+@attribute [Authorize(Roles = "Admin, Purchasing")]
+@using Microsoft.EntityFrameworkCore
+@inject ApplicationDbContext DbContext
+@inject NavigationManager Navigation
+@inject PurchaseOrderService PurchaseOrderSvc
+
+<h3>Tạo Đơn nhập hàng mới</h3>
+
+<EditForm Model="@newPurchaseOrder" OnValidSubmit="HandleCreatePurchaseOrder">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+
+    <div class="card">
+        <div class="card-body">
+            <h5 class="card-title">Thông tin chung</h5>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label>Chọn Nhà cung cấp</label>
+                    <InputSelect @bind-Value="newPurchaseOrder.SupplierId" class="form-select">
+                        <option value="0">-- Vui lòng chọn --</option>
+                        @if (suppliers != null)
+                        {
+                            @foreach (var supplier in suppliers)
+                            {
+                                <option value="@supplier.Id">@supplier.Name</option>
+                            }
+                        }
+                    </InputSelect>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label>Ngày giao hàng dự kiến</label>
+                    <InputDate @bind-Value="newPurchaseOrder.ExpectedDeliveryDate" class="form-control" />
+                </div>
+            </div>
+
+            <hr />
+
+            <h5 class="card-title">Thêm sản phẩm vào đơn</h5>
+            <div class="row align-items-end">
+                <div class="col-md-5">
+                    <label>Sản phẩm</label>
+                    <InputSelect @bind-Value="newItem.ProductId" class="form-select">
+                        <option value="0">-- Chọn sản phẩm --</option>
+                         @if (products != null)
+                        {
+                            @foreach (var product in products)
+                            {
+                                <option value="@product.Id">@product.Name</option>
+                            }
+                        }
+                    </InputSelect>
+                </div>
+                <div class="col-md-3">
+                    <label>Số lượng</label>
+                    <InputNumber @bind-Value="newItem.Quantity" class="form-control" />
+                </div>
+                <div class="col-md-3">
+                    <label>Đơn giá nhập</label>
+                    <InputNumber @bind-Value="newItem.UnitPrice" class="form-control" />
+                </div>
+                <div class="col-md-1">
+                    <button type="button" class="btn btn-success" @onclick="AddItem">Thêm</button>
+                </div>
+            </div>
+
+            <h5 class="card-title mt-4">Các sản phẩm trong đơn</h5>
+            <table class="table">
+                <tbody>
+                    @foreach (var item in newPurchaseOrder.Items)
+                    {
+                        <tr>
+                            <td>@(products?.FirstOrDefault(p => p.Id == item.ProductId)?.Name)</td>
+                            <td>Số lượng: @item.Quantity</td>
+                            <td>Đơn giá: @item.UnitPrice.ToString("n0")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="card-footer">
+            <button type="submit" class="btn btn-primary">Tạo Đơn nhập hàng</button>
+            <a href="/admin/purchase-orders" class="btn btn-secondary">Hủy</a>
+        </div>
+    </div>
+</EditForm>
+
+
+@code {
+    private PurchaseOrder newPurchaseOrder = new();
+    private PurchaseOrderItem newItem = new();
+    private List<Supplier>? suppliers;
+    private List<Product>? products;
+
+    protected override async Task OnInitializedAsync()
+    {
+        suppliers = await DbContext.Suppliers.ToListAsync();
+        products = await DbContext.Products.ToListAsync();
+    }
+
+    private void AddItem()
+    {
+        if (newItem.ProductId > 0 && newItem.Quantity > 0)
+        {
+            newPurchaseOrder.Items.Add(newItem);
+            newItem = new(); // Reset for next item
+        }
+    }
+
+    private async Task HandleCreatePurchaseOrder()
+    {
+        // Đảm bảo sử dụng service để tạo đơn nhập hàng
+        await PurchaseOrderSvc.CreatePurchaseOrderAsync(newPurchaseOrder);
+        Navigation.NavigateTo("/admin/purchase-orders");
+    }
+}
+

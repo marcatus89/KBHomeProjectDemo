@@ -1,0 +1,66 @@
+@page "/admin/sales"
+@attribute [Authorize(Roles = "Admin, Sales")]
+@using Microsoft.EntityFrameworkCore
+@inject ApplicationDbContext DbContext
+
+<h3>Bảng điều khiển Kinh doanh (Sales)</h3>
+
+<div class="card">
+    <div class="card-header">
+        Các đơn hàng mới cần xác nhận
+    </div>
+    <div class="card-body">
+        @if (pendingOrders == null)
+        {
+            <LoadingSpinner />
+        }
+        else if (!pendingOrders.Any())
+        {
+            <div class="alert alert-success mt-3">
+                Tất cả các đơn hàng mới đã được xử lý!
+            </div>
+        }
+        else
+        {
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Mã Đơn hàng</th>
+                        <th>Tên Khách hàng</th>
+                        <th>Ngày đặt</th>
+                        <th>Tổng tiền</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var order in pendingOrders)
+                    {
+                        <tr>
+                            <td>#@order.Id</td>
+                            <td>@order.CustomerName</td>
+                            <td>@order.OrderDate.ToString("dd/MM/yyyy HH:mm")</td>
+                            <td>@order.TotalAmount.ToString("n0") VNĐ</td>
+                            <td>
+                                <a href="@($"/admin/orders/{order.Id}")" class="btn btn-sm btn-primary">Xem và Xác nhận</a>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+</div>
+
+@code {
+    private List<Order>? pendingOrders;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Chỉ lấy các đơn hàng đang ở trạng thái "Chờ xác nhận"
+        pendingOrders = await DbContext.Orders
+            .Where(o => o.Status == "Chờ xác nhận")
+            .OrderBy(o => o.OrderDate)
+            .ToListAsync();
+    }
+}
+

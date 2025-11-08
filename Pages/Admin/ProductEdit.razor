@@ -1,0 +1,149 @@
+@page "/admin/products/add"
+@page "/admin/products/edit/{ProductId:int}"
+@attribute [Authorize(Roles = "Admin")]
+@using Microsoft.EntityFrameworkCore
+@inject ApplicationDbContext DbContext
+@inject NavigationManager Navigation
+@inject ToastService ToastSvc
+
+<h3>@Title</h3>
+
+@if (isLoading)
+{
+    <LoadingSpinner />
+}
+else
+{
+    <EditForm Model="@CurrentProduct" OnValidSubmit="HandleValidSubmit">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="form-group mb-3">
+            <label for="name">Tên sản phẩm</label>
+            <InputText id="name" class="form-control" @bind-Value="CurrentProduct.Name" />
+            <ValidationMessage For="@(() => CurrentProduct.Name)" />
+        </div>
+
+        <div class="form-group mb-3">
+            <label for="price">Giá</label>
+            <InputNumber id="price" class="form-control" @bind-Value="CurrentProduct.Price" />
+        </div>
+
+        <div class="form-group mb-3">
+            <label for="imageUrl">URL Hình ảnh</label>
+            <InputText id="imageUrl" class="form-control" @bind-Value="CurrentProduct.ImageUrl" />
+        </div>
+        
+        <div class="form-group mb-3">
+            <label for="category">Danh mục</label>
+            <InputSelect id="category" class="form-select" @bind-Value="CurrentProduct.CategoryId">
+                <option value="0">-- Chọn danh mục --</option>
+                @if (categories != null)
+                {
+                    @foreach (var category in categories)
+                    {
+                        <option value="@category.Id">@category.Name</option>
+                    }
+                }
+            </InputSelect>
+            <ValidationMessage For="@(() => CurrentProduct.CategoryId)" />
+        </div>
+
+        <button type="submit" class="btn btn-primary">Lưu</button>
+        <a href="/admin/products" class="btn btn-secondary">Hủy</a>
+    </EditForm>
+}
+
+@code {
+    [Parameter]
+    public int ProductId { get; set; }
+
+    private Product CurrentProduct { get; set; } = new();
+    private List<Category>? categories;
+    private string Title { get; set; } = "Thêm sản phẩm mới";
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        categories = await DbContext.Categories.ToListAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ProductId != 0)
+        {
+            Title = "Chỉnh sửa sản phẩm";
+            var productFromDb = await DbContext.Products.FindAsync(ProductId);
+            if (productFromDb != null)
+            {
+                CurrentProduct = productFromDb;
+            }
+        }
+        else 
+        {
+            Title = "Thêm sản phẩm mới";
+            CurrentProduct = new Product();
+        }
+        isLoading = false;
+    }
+
+    private async Task HandleValidSubmit()
+    {
+        // 🔹 Chuẩn hóa tên sản phẩm: bỏ khoảng trắng thừa và chữ hoa/thường
+        var normalizedName = NormalizeName(CurrentProduct.Name);
+
+        if (string.IsNullOrWhiteSpace(normalizedName))
+        {
+            ToastSvc.ShowToast("⚠️ Tên sản phẩm không được để trống.", ToastLevel.Warning);
+            return;
+        }
+
+        // 🔹 Kiểm tra trùng tên trong bộ nhớ để tránh lỗi LINQ translation
+        var existingNames = await DbContext.Products
+            .AsNoTracking()
+            .Select(p => new { p.Id, p.Name })
+            .ToListAsync();
+
+        bool nameExists = existingNames
+            .Any(p => NormalizeName(p.Name) == normalizedName && p.Id != ProductId);
+
+        if (nameExists)
+        {
+            ToastSvc.ShowToast("❌ Tên sản phẩm đã tồn tại (không phân biệt hoa/thường hoặc khoảng trắng).", ToastLevel.Error);
+            return;
+        }
+
+        // ✅ Thêm hoặc cập nhật sản phẩm
+        if (ProductId == 0)
+        {
+            DbContext.Products.Add(CurrentProduct);
+            ToastSvc.ShowToast($"✅ Đã thêm sản phẩm \"{CurrentProduct.Name}\" thành công.", ToastLevel.Success);
+        }
+        else
+        {
+            var productToUpdate = await DbContext.Products.FindAsync(ProductId);
+            if (productToUpdate != null)
+            {
+                productToUpdate.Name = CurrentProduct.Name;
+                productToUpdate.Price = CurrentProduct.Price;
+                productToUpdate.ImageUrl = CurrentProduct.ImageUrl;
+                productToUpdate.CategoryId = CurrentProduct.CategoryId;
+                productToUpdate.StockQuantity = CurrentProduct.StockQuantity;
+
+                ToastSvc.ShowToast($"✅ Đã cập nhật sản phẩm \"{productToUpdate.Name}\" thành công.", ToastLevel.Success);
+            }
+        }
+
+        await DbContext.SaveChangesAsync();
+        Navigation.NavigateTo("/admin/products");
+    }
+
+    // 🧹 Chuẩn hóa tên: loại bỏ khoảng trắng dư và chuyển sang chữ thường
+    private string NormalizeName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return string.Empty;
+        // Xóa khoảng trắng thừa giữa các từ và hai đầu
+        var cleaned = string.Join(" ", name.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        return cleaned.Trim().ToLower();
+    }
+}

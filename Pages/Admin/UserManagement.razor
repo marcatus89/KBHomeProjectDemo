@@ -1,0 +1,143 @@
+@page "/admin/users"
+@attribute [Authorize(Roles = "Admin")]
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@inject UserManager<IdentityUser> UserManager
+
+<h3>Quản lý Người dùng</h3>
+
+<a href="/admin/users/create" class="btn btn-primary mb-3">Tạo người dùng mới</a>
+
+<!-- THANH TÌM KIẾM -->
+<div class="row mb-3">
+    <div class="col-md-6">
+        <input @bind="searchTerm" class="form-control" placeholder="Nhập email hoặc tên đăng nhập cần tìm..." />
+    </div>
+    <div class="col-md-6">
+        <button class="btn btn-primary me-2" @onclick="SearchUsers">Tìm kiếm</button>
+        <button class="btn btn-secondary" @onclick="ClearSearch">Xóa lọc</button>
+    </div>
+</div>
+
+@if (pagedUsers == null)
+{
+    <p><em>Đang tải danh sách...</em></p>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Email / Tên đăng nhập</th>
+                <th>Hành động</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (pagedUsers.Any())
+            {
+                @foreach (var user in pagedUsers)
+                {
+                    <tr>
+                        <td>@user.Email</td>
+                        <td>
+                            <a href="@($"admin/users/manage-roles/{user.Id}")" class="btn btn-sm btn-info">
+                                Quản lý Quyền
+                            </a>
+                        </td>
+                    </tr>
+                }
+            }
+            else
+            {
+                <tr><td colspan="2" class="text-center text-muted">Không có người dùng phù hợp.</td></tr>
+            }
+        </tbody>
+    </table>
+
+    <!-- PHÂN TRANG -->
+    @if (totalPages > 1)
+    {
+        <nav>
+            <ul class="pagination justify-content-center">
+                <li class="page-item @(currentPage == 1 ? "disabled" : "")">
+                    <button class="page-link" @onclick="() => ChangePage(currentPage - 1)">Trước</button>
+                </li>
+
+                @for (int i = 1; i <= totalPages; i++)
+                {
+                    <li class="page-item @(currentPage == i ? "active" : "")">
+                        <button class="page-link" @onclick="() => ChangePage(i)">@i</button>
+                    </li>
+                }
+
+                <li class="page-item @(currentPage == totalPages ? "disabled" : "")">
+                    <button class="page-link" @onclick="() => ChangePage(currentPage + 1)">Sau</button>
+                </li>
+            </ul>
+        </nav>
+    }
+}
+
+@code {
+    private List<IdentityUser>? allUsers;
+    private IEnumerable<IdentityUser>? pagedUsers;
+
+    private string? searchTerm;
+
+    // Phân trang
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private int totalPages = 1;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadUsers();
+    }
+
+    private async Task LoadUsers()
+    {
+        var query = UserManager.Users.AsQueryable();
+
+        // 🔍 Lọc theo email hoặc username (nếu có searchTerm)
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+        {
+            query = query.Where(u =>
+                u.Email.Contains(searchTerm) ||
+                u.UserName.Contains(searchTerm));
+        }
+
+        // 📋 Lấy toàn bộ danh sách (vì UserManager không hỗ trợ skip/take trực tiếp trong EF)
+        allUsers = await query
+            .OrderBy(u => u.Email)
+            .ToListAsync();
+
+        // 📄 Tính tổng trang
+        totalPages = (int)Math.Ceiling((double)allUsers.Count / pageSize);
+        if (totalPages == 0) totalPages = 1;
+
+        // 🧮 Lấy dữ liệu trang hiện tại
+        pagedUsers = allUsers
+            .Skip((currentPage - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+    }
+
+    private async Task SearchUsers()
+    {
+        currentPage = 1;
+        await LoadUsers();
+    }
+
+    private async Task ClearSearch()
+    {
+        searchTerm = null;
+        currentPage = 1;
+        await LoadUsers();
+    }
+
+    private async Task ChangePage(int page)
+    {
+        currentPage = page;
+        await LoadUsers();
+    }
+}

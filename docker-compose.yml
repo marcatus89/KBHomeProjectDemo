@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    environment:
+      SA_PASSWORD: "268191Thiena@"
+      ACCEPT_EULA: "Y"
+    ports:
+      - "1433:1433"
+    healthcheck:
+      test: ["CMD", "/opt/mssql-tools/bin/sqlcmd", "-S", "localhost", "-U", "sa", "-P", "268191Thiena@", "-Q", "select 1" ]
+      interval: 10s
+      retries: 10
+
+  api:
+    build: .
+    depends_on:
+      - sqlserver
+    environment:
+      ConnectionStrings__DefaultConnection: "Server=sqlserver;Database=KBHomeDb;User Id=sa;Password=268191Thiena@;"
+      Jwt__Key: "k6qqknuGTVBeuLt7lLrAj60UDq0+OYV/C2T0K7qd/fHB/L5XQWRJkz1rw/p0tFmNN0GGhQipmw83+eXYMYI/tFA=="
+      Jwt__Issuer: "KBHome"
+      Jwt__Audience: "KBHomeUsers"
+      Jwt__ExpiryMinutes: "60"
+    ports:
+      - "5001:80"

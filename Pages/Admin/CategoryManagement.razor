@@ -1,0 +1,95 @@
+@page "/admin/categories"
+@attribute [Authorize(Roles = "Admin")]
+@using Microsoft.EntityFrameworkCore
+@inject ApplicationDbContext DbContext
+@inject ToastService ToastSvc
+
+<h3>Quản lý Danh mục</h3>
+
+<a href="/admin/categories/add" class="btn btn-primary mb-3">Thêm danh mục mới</a>
+
+@if (categoryList == null)
+{
+    <p><em>Đang tải...</em></p>
+}
+else
+{
+    <table class="table table-hover">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Tên Danh mục</th>
+                <th class="text-center">Số sản phẩm</th>
+                <th class="text-end">Hành động</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var category in categoryList)
+            {
+                <tr>
+                    <td>@category.Id</td>
+                    <td>@category.Name</td>
+                    <td class="text-center">@category.ProductCount</td>
+                    <td class="text-end">
+                        <a href="@($"admin/categories/edit/{category.Id}")" class="btn btn-sm btn-secondary">Sửa</a>
+                        <button class="btn btn-sm btn-danger" @onclick="() => DeleteCategory(category.Id)">Xóa</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<CategoryViewModel>? categoryList;
+
+    private class CategoryViewModel
+    {
+        public int Id { get; set; }
+        public string? Name { get; set; }
+        public int ProductCount { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        categoryList = await DbContext.Categories
+            .Select(c => new CategoryViewModel
+            {
+                Id = c.Id,
+                Name = c.Name,
+                ProductCount = DbContext.Products.Count(p => p.CategoryId == c.Id)
+            })
+            .OrderBy(c => c.Name)
+            .ToListAsync();
+    }
+
+    private async Task DeleteCategory(int categoryId)
+    {
+        // Lấy danh mục kèm theo số sản phẩm
+        var productCount = await DbContext.Products.CountAsync(p => p.CategoryId == categoryId);
+        var category = await DbContext.Categories.FindAsync(categoryId);
+
+        if (category == null)
+        {
+            ToastSvc.ShowToast("❌ Không tìm thấy danh mục cần xóa.", ToastLevel.Error);
+            return;
+        }
+
+        // ✅ Cấm xóa nếu có sản phẩm
+        if (productCount > 0)
+        {
+            ToastSvc.ShowToast(
+                $"⚠️ Không thể xóa danh mục \"{category.Name}\" vì có {productCount} sản phẩm thuộc danh mục này.",
+                ToastLevel.Warning
+            );
+            return;
+        }
+
+        // Xóa danh mục
+        DbContext.Categories.Remove(category);
+        await DbContext.SaveChangesAsync();
+
+        categoryList?.Remove(categoryList.First(c => c.Id == categoryId));
+        ToastSvc.ShowToast($"✅ Đã xóa danh mục \"{category.Name}\" thành công.", ToastLevel.Success);
+    }
+}

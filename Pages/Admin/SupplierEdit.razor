@@ -1,0 +1,62 @@
+@page "/admin/suppliers/add"
+@page "/admin/suppliers/edit/{SupplierId:int}"
+@attribute [Authorize(Roles = "Admin, Purchasing")]
+@inject ApplicationDbContext DbContext
+@inject NavigationManager Navigation
+
+<h3>@Title</h3>
+
+<EditForm Model="@currentSupplier" OnValidSubmit="HandleValidSubmit">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+
+    <div class="form-group mb-3">
+        <label>Tên Nhà cung cấp</label>
+        <InputText class="form-control" @bind-Value="currentSupplier.Name" />
+    </div>
+     <div class="form-group mb-3">
+        <label>Người liên hệ</label>
+        <InputText class="form-control" @bind-Value="currentSupplier.ContactPerson" />
+    </div>
+     <div class="form-group mb-3">
+        <label>Email</label>
+        <InputText type="email" class="form-control" @bind-Value="currentSupplier.Email" />
+    </div>
+     <div class="form-group mb-3">
+        <label>Số điện thoại</label>
+        <InputText class="form-control" @bind-Value="currentSupplier.PhoneNumber" />
+    </div>
+
+    <button type="submit" class="btn btn-primary">Lưu</button>
+    <a href="/admin/suppliers" class="btn btn-secondary">Hủy</a>
+</EditForm>
+
+@code {
+    [Parameter]
+    public int SupplierId { get; set; }
+
+    private Supplier currentSupplier = new();
+    private string Title => SupplierId == 0 ? "Thêm Nhà cung cấp" : "Sửa Nhà cung cấp";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (SupplierId != 0)
+        {
+            currentSupplier = await DbContext.Suppliers.FindAsync(SupplierId) ?? new();
+        }
+    }
+
+    private async Task HandleValidSubmit()
+    {
+        if (SupplierId == 0)
+        {
+            DbContext.Suppliers.Add(currentSupplier);
+        }
+        else
+        {
+            DbContext.Suppliers.Update(currentSupplier);
+        }
+        await DbContext.SaveChangesAsync();
+        Navigation.NavigateTo("/admin/suppliers");
+    }
+}

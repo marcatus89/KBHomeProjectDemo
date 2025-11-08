@@ -1,0 +1,118 @@
+@page "/admin/warehouse"
+@attribute [Authorize(Roles = "Admin, Warehouse")]
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<h3>Bảng điều khiển Kho</h3>
+
+<div class="row">
+    @* Cột 1: Đơn hàng cần xử lý để giao cho khách *@
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <span class="oi oi-box"></span> Đơn hàng cần xử lý (Xuất kho)
+            </div>
+            <div class="card-body">
+                @if (ordersToFulfill == null)
+                {
+                    <LoadingSpinner />
+                }
+                else if (!ordersToFulfill.Any())
+                {
+                    <div class="alert alert-success mt-3">Không có đơn hàng nào cần xử lý.</div>
+                }
+                else
+                {
+                    <ul class="list-group">
+                        @foreach (var order in ordersToFulfill)
+                        {
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                Đơn hàng #@order.Id - @order.CustomerName
+                                <a href="@($"/admin/orders/{order.Id}")" class="btn btn-sm btn-info">Chuẩn bị hàng</a>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    </div>
+
+    @* Cột 2: Đơn nhập hàng đang chờ nhận *@
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <span class="oi oi-clipboard"></span> Đơn nhập hàng đang chờ (Nhập kho)
+            </div>
+            <div class="card-body">
+                @if (purchaseOrdersToReceive == null)
+                {
+                    <LoadingSpinner />
+                }
+                else if (!purchaseOrdersToReceive.Any())
+                {
+                     <div class="alert alert-info mt-3">Không có đơn nhập hàng nào đang chờ.</div>
+                }
+                else
+                {
+                    <ul class="list-group">
+                        @foreach (var po in purchaseOrdersToReceive)
+                        {
+                             <li class="list-group-item d-flex justify-content-between align-items-center">
+                                Phiếu nhập @po.PurchaseOrderNumber - @po.Supplier?.Name
+                                <a href="@($"/admin/purchase-orders/{po.Id}")" class="btn btn-sm btn-secondary">Xem/Nhận hàng</a>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<Order>? ordersToFulfill;
+    private List<PurchaseOrder>? purchaseOrdersToReceive;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Những trạng thái mà kho thường quan tâm — điều chỉnh theo luồng của bạn nếu cần
+        var statusesForWarehouse = new[]
+        {
+            "Đã thanh toán",
+            "Sẵn sàng giao hàng",
+            "Chờ thanh toán",
+            "Chờ xác nhận"
+        };
+
+        try
+        {
+            // THUẬT TOÁN AN TOÀN: tạo từng DbContext riêng, chạy truy vấn tuần tự.
+            await using (var dbOrders = await DbFactory.CreateDbContextAsync())
+            {
+                ordersToFulfill = await dbOrders.Orders
+                    .AsNoTracking()
+                    .Where(o => statusesForWarehouse.Contains(o.Status))
+                    .OrderBy(o => o.OrderDate)
+                    .ToListAsync();
+            }
+
+            await using (var dbPO = await DbFactory.CreateDbContextAsync())
+            {
+                purchaseOrdersToReceive = await dbPO.PurchaseOrders
+                    .AsNoTracking()
+                    .Include(po => po.Supplier)
+                    .Where(po => po.Status == "Đã đặt hàng")
+                    .OrderBy(po => po.OrderDate)
+                    .ToListAsync();
+            }
+
+            Console.WriteLine($"[WarehouseDashboard] Loaded ordersToFulfill={ordersToFulfill?.Count ?? 0}, purchaseOrdersToReceive={purchaseOrdersToReceive?.Count ?? 0}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[WarehouseDashboard] Error loading dashboard: " + ex);
+            ordersToFulfill = new List<Order>();
+            purchaseOrdersToReceive = new List<PurchaseOrder>();
+        }
+    }
+}

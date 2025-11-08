@@ -1,0 +1,116 @@
+@inject IJSRuntime JSRuntime
+@implements IAsyncDisposable
+
+<div id="heroCarousel" class="carousel slide carousel-fade" data-bs-ride="carousel">
+    <!-- Indicators -->
+    <div class="carousel-indicators">
+        <button type="button" data-bs-target="#heroCarousel" data-bs-slide-to="0" class="active" aria-current="true" aria-label="Slide 1"></button>
+        <button type="button" data-bs-target="#heroCarousel" data-bs-slide-to="1" aria-label="Slide 2"></button>
+        <button type="button" data-bs-target="#heroCarousel" data-bs-slide-to="2" aria-label="Slide 3"></button>
+        <button type="button" data-bs-target="#heroCarousel" data-bs-slide-to="3" aria-label="Slide 4"></button>
+        <button type="button" data-bs-target="#heroCarousel" data-bs-slide-to="4" aria-label="Slide 5"></button>
+    </div>
+
+    <!-- Slides -->
+    <div class="carousel-inner">
+
+        <div class="carousel-item active">
+            <img src="/images/slide-1.jpg" class="d-block w-100" alt="Slide 1">
+            <div class="carousel-caption">
+                <h1>Kiến tạo không gian, nâng tầm đẳng cấp</h1>
+                <p>Khám phá các giải pháp phòng tắm và thiết bị vệ sinh cao cấp hàng đầu.</p>
+                <a href="/san-pham" class="btn btn-light btn-lg mt-3">Xem tất cả sản phẩm</a>
+            </div>
+        </div>
+
+        <div class="carousel-item">
+            <img src="/images/slide-2.jpg" class="d-block w-100" alt="Slide 2">
+            <div class="carousel-caption">
+                <h1>Thiết kế vượt thời gian</h1>
+                <p>Sự kết hợp hoàn hảo giữa thẩm mỹ và công năng.</p>
+                <a href="/san-pham" class="btn btn-light btn-lg mt-3">Xem tất cả sản phẩm</a>
+            </div>
+        </div>
+
+        <div class="carousel-item">
+            <img src="/images/slide-3.jpg" class="d-block w-100" alt="Slide 3">
+            <div class="carousel-caption">
+                <h1>Vật liệu cao cấp</h1>
+                <p>Chất lượng bền bỉ, khẳng định vị thế của bạn.</p>
+                <a href="/san-pham" class="btn btn-light btn-lg mt-3">Xem tất cả sản phẩm</a>
+            </div>
+        </div>
+
+        <div class="carousel-item">
+            <img src="/images/slide-4.jpg" class="d-block w-100" alt="Slide 4">
+            <div class="carousel-caption">
+                <h1>Công nghệ thông minh</h1>
+                <p>Trải nghiệm sự tiện nghi và thư giãn tuyệt đối.</p>
+                <a href="/san-pham" class="btn btn-light btn-lg mt-3">Xem tất cả sản phẩm</a>
+            </div>
+        </div>
+
+        <div class="carousel-item">
+            <img src="/images/slide-5.jpg" class="d-block w-100" alt="Slide 5">
+            <div class="carousel-caption">
+                <h1>Dịch vụ chuyên nghiệp</h1>
+                <p>Tư vấn và lắp đặt bởi đội ngũ chuyên gia hàng đầu.</p>
+                <a href="/san-pham" class="btn btn-light btn-lg mt-3">Xem tất cả sản phẩm</a>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Controls -->
+    <button class="carousel-control-prev" type="button" data-bs-target="#heroCarousel" data-bs-slide="prev">
+        <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+        <span class="visually-hidden">Trước</span>
+    </button>
+    <button class="carousel-control-next" type="button" data-bs-target="#heroCarousel" data-bs-slide="next">
+        <span class="carousel-control-next-icon" aria-hidden="true"></span>
+        <span class="visually-hidden">Tiếp</span>
+    </button>
+</div>
+
+@code {
+    private IJSObjectReference? _module;
+    private bool _isJsReady = false;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                _module = await JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/slider-init.js");
+                _isJsReady = true;
+
+                if (_module is not null)
+                    await _module.InvokeVoidAsync("initCarousel", "#heroCarousel");
+            }
+            catch (InvalidOperationException)
+            {
+                // Bỏ qua khi prerender
+            }
+            catch (JSDisconnectedException)
+            {
+                // Bỏ qua khi người dùng rời trang
+            }
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_isJsReady && _module is not null)
+        {
+            try
+            {
+                await _module.InvokeVoidAsync("disposeCarousel", "#heroCarousel");
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException) { }
+            catch (InvalidOperationException) { }
+        }
+    }
+}
+`

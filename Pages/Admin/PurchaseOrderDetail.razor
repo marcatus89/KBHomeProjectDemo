@@ -1,0 +1,265 @@
+@page "/admin/purchase-orders/{PurchaseOrderId:int}"
+@attribute [Authorize(Roles = "Admin, Purchasing, Warehouse")]
+@using Microsoft.EntityFrameworkCore
+@using System.Security.Claims
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
+@inject ToastService ToastSvc
+@inject AuthenticationStateProvider AuthStateProvider
+
+<h3>Chi tiết Đơn nhập hàng #@PurchaseOrderId</h3>
+
+@if (isLoading)
+{
+    <LoadingSpinner />
+}
+else if (purchaseOrder == null)
+{
+    <div class="alert alert-warning">Không tìm thấy phiếu nhập.</div>
+}
+else
+{
+    <div id="printable-area" class="printable-container">
+        <h2 class="text-center">PHIẾU NHẬP KHO</h2>
+        <p class="text-center"><strong>Số phiếu:</strong> @purchaseOrder.PurchaseOrderNumber</p>
+        <hr />
+        <p><strong>Nhà cung cấp:</strong> @purchaseOrder.Supplier?.Name</p>
+        <p><strong>Ngày đặt hàng:</strong> @purchaseOrder.OrderDate.ToString("dd/MM/yyyy")</p>
+        <p><strong>Ngày nhận dự kiến:</strong> @(purchaseOrder.ExpectedDeliveryDate?.ToString("dd/MM/yyyy") ?? "-")</p>
+
+        <table class="table table-bordered mt-4">
+            <thead>
+                <tr>
+                    <th>STT</th>
+                    <th>Tên Sản phẩm</th>
+                    <th>Số lượng</th>
+                    <th>Đơn giá</th>
+                    <th>Thành tiền</th>
+                </tr>
+            </thead>
+            <tbody>
+                @{
+                    int count = 1;
+                    decimal total = 0;
+                }
+                @foreach (var item in purchaseOrder.Items)
+                {
+                    var subtotal = item.Quantity * item.UnitPrice;
+                    total += subtotal;
+                    <tr>
+                        <td>@(count++)</td>
+                        <td>@item.Product?.Name</td>
+                        <td>@item.Quantity</td>
+                        <td>@item.UnitPrice.ToString("n0")</td>
+                        <td>@subtotal.ToString("n0")</td>
+                    </tr>
+                }
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="4" class="text-end"><strong>Tổng cộng</strong></td>
+                    <td><strong>@total.ToString("n0") VNĐ</strong></td>
+                </tr>
+            </tfoot>
+        </table>
+
+        <div class="signature-section">
+            <div class="signature-box">
+                <p><strong>Người lập phiếu</strong></p>
+                <p>(Ký, họ tên)</p>
+            </div>
+            <div class="signature-box">
+                <p><strong>Thủ kho</strong></p>
+                <p>(Ký, họ tên)</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="display-area" class="card mt-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <div>
+                <strong>Số phiếu:</strong> @purchaseOrder.PurchaseOrderNumber |
+                <strong>Nhà cung cấp:</strong> @purchaseOrder.Supplier?.Name |
+                <strong>Trạng thái:</strong>
+                <span class="badge @(purchaseOrder.Status == "Đã nhận hàng" ? "bg-success" : "bg-warning text-dark")">@purchaseOrder.Status</span>
+            </div>
+            <div>
+                <button class="btn btn-outline-secondary me-2" @onclick="Print"><span class="oi oi-print"></span> In Phiếu</button>
+                @if (canReceive)
+                {
+                    <button class="btn btn-success" @onclick="HandleReceiveItems" disabled="@isProcessing">Xác nhận đã nhận đủ hàng</button>
+                }
+            </div>
+        </div>
+
+        <div class="card-body">
+            <h5 class="card-title">Danh sách sản phẩm</h5>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Sản phẩm</th>
+                        <th>Số lượng đặt</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in purchaseOrder.Items)
+                    {
+                        <tr>
+                            <td>@item.Product?.Name</td>
+                            <td>@item.Quantity</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card-footer">
+            <a href="/admin/purchase-orders" class="btn btn-secondary">Quay lại</a>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int PurchaseOrderId { get; set; }
+
+    private PurchaseOrder? purchaseOrder;
+    private bool isLoading = true;
+    private bool isProcessing = false;
+    private bool canReceive = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        isLoading = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            purchaseOrder = await db.PurchaseOrders
+                                    .Include(po => po.Supplier)
+                                    .Include(po => po.Items)
+                                        .ThenInclude(i => i.Product)
+                                    .FirstOrDefaultAsync(po => po.Id == PurchaseOrderId);
+
+            canReceive = purchaseOrder != null && purchaseOrder.Status == "Đã đặt hàng";
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[PurchaseOrderDetail] Load error: " + ex);
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task HandleReceiveItems()
+    {
+        if (purchaseOrder == null) return;
+
+        if (purchaseOrder.Status == "Đã nhận hàng")
+        {
+            ToastSvc.ShowToast("Phiếu đã được nhận trước đó.", ToastLevel.Info);
+            return;
+        }
+
+        var ok = await JSRuntime.InvokeAsync<bool>("confirm", $"Xác nhận đã nhận đủ {purchaseOrder.Items.Sum(i => i.Quantity)} mặt hàng cho phiếu {purchaseOrder.PurchaseOrderNumber}?");
+        if (!ok) return;
+
+        isProcessing = true;
+        try
+        {
+            // lấy thông tin người thao tác
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = auth.User;
+            var receiver = user?.Identity?.Name ?? "Hệ thống";
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await using var tx = await db.Database.BeginTransactionAsync();
+            try
+            {
+                // reload purchaseOrder in this context (for update)
+                var po = await db.PurchaseOrders
+                                 .Include(po2 => po2.Items)
+                                 .FirstOrDefaultAsync(po2 => po2.Id == purchaseOrder.Id);
+
+                if (po == null)
+                {
+                    ToastSvc.ShowToast("Không tìm thấy phiếu trên cơ sở dữ liệu.", ToastLevel.Error);
+                    await tx.RollbackAsync();
+                    return;
+                }
+
+                if (po.Status == "Đã nhận hàng")
+                {
+                    ToastSvc.ShowToast("Phiếu đã được nhận trước đó.", ToastLevel.Info);
+                    await tx.RollbackAsync();
+                    return;
+                }
+
+                // cập nhật tồn kho từng sản phẩm và ghi log (có OldQuantity)
+                foreach (var item in po.Items)
+                {
+                    var product = await db.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId);
+                    if (product == null)
+                    {
+                        // nếu thiếu product: rollback và báo lỗi
+                        ToastSvc.ShowToast($"Không tìm thấy sản phẩm ID={item.ProductId}. Hủy thao tác.", ToastLevel.Error);
+                        await tx.RollbackAsync();
+                        return;
+                    }
+
+                    int oldQty = product.StockQuantity;
+                    product.StockQuantity += item.Quantity;
+                    db.Products.Update(product);
+
+                    var log = new InventoryLog
+                    {
+                        ProductId = product.Id,
+                        OldQuantity = oldQty,                        // <<-- ghi tồn cũ
+                        QuantityChange = item.Quantity,              // + vì nhập
+                        NewQuantity = product.StockQuantity,
+                        Reason = $"Nhập hàng từ phiếu {po.PurchaseOrderNumber} (nhận bởi {receiver})",
+                        Timestamp = DateTime.UtcNow
+                    };
+                    await db.InventoryLogs.AddAsync(log);
+                }
+
+                // chuyển trạng thái phiếu
+                po.Status = "Đã nhận hàng";
+                db.PurchaseOrders.Update(po);
+
+                await db.SaveChangesAsync();
+                await tx.CommitAsync();
+
+                // cập nhật UI
+                purchaseOrder.Status = "Đã nhận hàng";
+                // cập nhật số tồn hiển thị trong product objects nếu cần
+                foreach (var pitem in purchaseOrder.Items)
+                {
+                    var prodInDb = await db.Products.AsNoTracking().FirstOrDefaultAsync(p => p.Id == pitem.ProductId);
+                    if (prodInDb != null)
+                        pitem.Product!.StockQuantity = prodInDb.StockQuantity;
+                }
+
+                canReceive = false;
+                ToastSvc.ShowToast($"✅ Đã nhận hàng cho phiếu {purchaseOrder.PurchaseOrderNumber}.", ToastLevel.Success);
+            }
+            catch (Exception exInner)
+            {
+                try { await tx.RollbackAsync(); } catch { }
+                Console.WriteLine("[PurchaseOrderDetail] Receive error: " + exInner);
+                ToastSvc.ShowToast("Lỗi khi xử lý nhận hàng. Vui lòng thử lại.", ToastLevel.Error);
+            }
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task Print()
+    {
+        await JSRuntime.InvokeVoidAsync("triggerPrint");
+    }
+}

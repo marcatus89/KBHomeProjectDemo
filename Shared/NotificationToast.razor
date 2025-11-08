@@ -1,0 +1,56 @@
+@inject DoAnTotNghiep.Services.ToastService ToastSvc
+@implements IDisposable
+@using DoAnTotNghiep.Services
+@inject ToastService ToastSvc
+@if (IsVisible)
+{
+    <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1100;">
+        <div class="toast show @ToastCssClass text-white border-0 shadow" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="d-flex">
+                <div class="toast-body">
+                    @Message
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" @onclick="HideToast" aria-label="Close">x</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string Message { get; set; } = string.Empty;
+    private bool IsVisible { get; set; }
+    private string ToastCssClass { get; set; } = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        ToastSvc.OnShow += ShowToast;
+        ToastSvc.OnHide += HideToast;
+    }
+
+    private void ShowToast(string message, ToastLevel level)
+    {
+        Message = message;
+        ToastCssClass = level switch
+        {
+            ToastLevel.Success => "bg-success",
+            ToastLevel.Warning => "bg-warning text-dark",
+            ToastLevel.Error => "bg-danger",
+            _ => "bg-info"
+        };
+
+        IsVisible = true;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void HideToast()
+    {
+        IsVisible = false;
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        ToastSvc.OnShow -= ShowToast;
+        ToastSvc.OnHide -= HideToast;
+    }
+}

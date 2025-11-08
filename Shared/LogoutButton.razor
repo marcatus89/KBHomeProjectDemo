@@ -1,0 +1,59 @@
+@namespace DoAnTotNghiep.Shared
+@using Microsoft.AspNetCore.Components.Authorization
+@using DoAnTotNghiep.Services
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+
+<AuthorizeView>
+    <Authorized>
+        <button class="btn btn-outline-secondary btn-sm rounded-pill px-3"
+                @onclick="Logout"
+                disabled="@_isProcessing">
+            <i class="bi bi-box-arrow-right"></i> Đăng xuất
+        </button>
+    </Authorized>
+    <NotAuthorized>
+        <!-- Không hiển thị nếu chưa đăng nhập -->
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    private bool _isProcessing = false;
+
+    private async Task Logout()
+    {
+        if (_isProcessing) return;
+        _isProcessing = true;
+
+        try
+        {
+            // Xóa token khỏi localStorage (bọc try/catch vì prerendering có thể không hỗ trợ JS)
+            try
+            {
+                await JS.InvokeVoidAsync("localStorage.removeItem", "jwt");
+            }
+            catch
+            {
+                // bỏ qua nếu JS không khả dụng (prerender)
+            }
+
+            // Nếu provider là CustomAuthenticationStateProvider (our implementation), gọi LogoutAsync()
+            if (AuthStateProvider is CustomAuthenticationStateProvider custom)
+            {
+                await custom.LogoutAsync();
+            }
+            else
+            {
+                // fallback: nếu không phải provider custom, reload trang để UI cập nhật
+                Navigation.NavigateTo("/", forceLoad: true);
+            }
+        }
+        finally
+        {
+            _isProcessing = false;
+            // đảm bảo UI được refresh
+            Navigation.NavigateTo("/", forceLoad: true);
+        }
+    }
+}

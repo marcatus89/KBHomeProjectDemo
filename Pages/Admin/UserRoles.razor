@@ -1,0 +1,256 @@
+@page "/admin/users/manage-roles/{UserId}"
+@attribute [Authorize(Roles = "Admin")]
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@inject UserManager<IdentityUser> UserManager
+@inject RoleManager<IdentityRole> RoleManager
+@inject NavigationManager Navigation
+
+<h3>Quản lý Quyền cho: @Model.UserName</h3>
+
+@if (!string.IsNullOrEmpty(AlertError))
+{
+    <div class="alert alert-danger">@AlertError</div>
+}
+@if (!string.IsNullOrEmpty(AlertSuccess))
+{
+    <div class="alert alert-success">@AlertSuccess</div>
+}
+
+@if (Model.UserId != null)
+{
+     <EditForm Model="@Model" OnValidSubmit="HandleValidSubmit">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        @foreach (var role in Model.Roles)
+        {
+            var checkboxId = $"role_{role.RoleName.Replace(" ", "_")}";
+            <div class="form-check">
+                <InputCheckbox @bind-Value="role.IsSelected" class="form-check-input" id="@checkboxId" />
+                <label class="form-check-label" for="@checkboxId">@role.RoleName</label>
+            </div>
+        }
+
+        <div class="mt-3 d-flex gap-2">
+            <button type="submit" class="btn btn-primary" disabled="@IsBusy">
+                @(IsBusy ? "Đang lưu..." : "Lưu thay đổi")
+            </button>
+
+            <!-- Nút xoá người dùng ở đây -->
+            <button type="button" class="btn btn-danger" @onclick="ConfirmDelete" disabled="@IsBusy">
+                Xoá người dùng
+            </button>
+
+            <a href="/admin/users" class="btn btn-secondary">Quay lại</a>
+        </div>
+    </EditForm>
+}
+else
+{
+    <p>Không tìm thấy người dùng.</p>
+}
+
+@code {
+    [Parameter] public string? UserId { get; set; }
+
+    private UserRolesViewModel Model { get; set; } = new();
+    private string? AlertError;
+    private string? AlertSuccess;
+    private bool IsBusy;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        AlertError = AlertSuccess = null;
+        Model = new UserRolesViewModel { Roles = new List<RoleViewModel>() }; // reset state
+
+        if (string.IsNullOrWhiteSpace(UserId))
+            return;
+
+        var user = await UserManager.FindByIdAsync(UserId);
+        if (user is null)
+            return;
+
+        Model.UserId = user.Id;
+        Model.UserName = user.UserName ?? string.Empty;
+
+        var allRoles = await RoleManager.Roles.OrderBy(r => r.Name).ToListAsync();
+        var userRoles = await UserManager.GetRolesAsync(user);
+
+        foreach (var role in allRoles)
+        {
+            var name = role.Name ?? string.Empty;
+            Model.Roles.Add(new RoleViewModel
+            {
+                RoleName = name,
+                IsSelected = userRoles.Contains(name)
+            });
+        }
+    }
+
+    private async Task HandleValidSubmit()
+    {
+        if (Model.UserId is null) return;
+
+        IsBusy = true;
+        AlertError = AlertSuccess = null;
+
+        try
+        {
+            var user = await UserManager.FindByIdAsync(Model.UserId);
+            if (user is null)
+            {
+                AlertError = "Người dùng không tồn tại.";
+                return;
+            }
+
+            var currentRoles = await UserManager.GetRolesAsync(user);
+            var desiredRoles = Model.Roles.Where(r => r.IsSelected).Select(r => r.RoleName).ToList();
+
+            var toAdd = desiredRoles.Except(currentRoles).ToList();
+            var toRemove = currentRoles.Except(desiredRoles).ToList();
+
+            // Chặn xoá Admin cuối cùng
+            if (toRemove.Contains("Admin"))
+            {
+                
+                var admins = await UserManager.Users.ToListAsync();
+                var otherAdminCount = 0;
+                foreach (var u in admins)
+                {
+                    if (u.Id == user.Id) continue;
+                    var rolesU = await UserManager.GetRolesAsync(u);
+                    if (rolesU.Contains("Admin")) otherAdminCount++;
+                }
+
+                if (otherAdminCount == 0)
+                {
+                    AlertError = "Không thể xoá vai trò Admin cuối cùng trong hệ thống.";
+                    return;
+                }
+            }
+
+            if (toAdd.Any())
+            {
+                var addResult = await UserManager.AddToRolesAsync(user, toAdd);
+                if (!addResult.Succeeded)
+                {
+                    AlertError = string.Join("; ", addResult.Errors.Select(e => e.Description));
+                    return;
+                }
+            }
+
+            if (toRemove.Any())
+            {
+                var removeResult = await UserManager.RemoveFromRolesAsync(user, toRemove);
+                if (!removeResult.Succeeded)
+                {
+                    AlertError = string.Join("; ", removeResult.Errors.Select(e => e.Description));
+                    return;
+                }
+            }
+
+            AlertSuccess = "Đã cập nhật vai trò thành công.";
+            // Điều hướng về danh sách nếu bạn muốn:
+            // Navigation.NavigateTo("/admin/users");
+        }
+        catch (Exception ex)
+        {
+            AlertError = $"Có lỗi xảy ra: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    // ViewModels
+    private class UserRolesViewModel
+    {
+        public string? UserId { get; set; }
+        public string UserName { get; set; } = "";
+        public List<RoleViewModel> Roles { get; set; } = new();
+    }
+
+    private class RoleViewModel
+    {
+        public string RoleName { get; set; } = "";
+        public bool IsSelected { get; set; }
+    }
+    [Inject] private Microsoft.JSInterop.IJSRuntime JS { get; set; } = default!;
+    [Inject] private AuthenticationStateProvider AuthStateProvider { get; set; } = default!;
+
+    private async Task ConfirmDelete()
+    {
+        if (string.IsNullOrEmpty(Model.UserId)) return;
+
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Bạn có chắc muốn xoá người dùng '{Model.UserName}'? Hành động này không thể hoàn tác.");
+        if (!ok) return;
+
+        await DeleteUser();
+    }
+
+    private async Task DeleteUser()
+    {
+        try
+        {
+            IsBusy = true;
+            AlertError = AlertSuccess = null;
+
+            var user = await UserManager.FindByIdAsync(Model.UserId!);
+            if (user is null)
+            {
+                AlertError = "Người dùng không tồn tại.";
+                return;
+            }
+
+            // Chặn xoá chính mình
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            var me = await UserManager.GetUserAsync(auth.User);
+            if (me?.Id == user.Id)
+            {
+                AlertError = "Bạn không thể tự xoá tài khoản của mình.";
+                return;
+            }
+
+            // Chặn xoá Admin cuối cùng
+            var roles = await UserManager.GetRolesAsync(user);
+            if (roles.Contains("Admin"))
+            {
+                var all = await UserManager.Users.ToListAsync();
+                var otherAdminCount = 0;
+                foreach (var u in all)
+                {
+                    if (u.Id == user.Id) continue;
+                    var ru = await UserManager.GetRolesAsync(u);
+                    if (ru.Contains("Admin")) otherAdminCount++;
+                }
+                if (otherAdminCount == 0)
+                {
+                    AlertError = "Không thể xoá Admin cuối cùng trong hệ thống.";
+                    return;
+                }
+            }
+
+            var result = await UserManager.DeleteAsync(user);
+            if (result.Succeeded)
+            {
+                AlertSuccess = $"Đã xoá người dùng {user.Email}.";
+                Navigation.NavigateTo("/admin/users"); // quay về danh sách
+            }
+            else
+            {
+                AlertError = string.Join("; ", result.Errors.Select(e => e.Description));
+            }
+        }
+        catch (Exception ex)
+        {
+            AlertError = $"Có lỗi xảy ra khi xoá: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+}

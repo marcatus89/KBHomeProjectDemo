@@ -1,0 +1,62 @@
+@page "/register"
+@using System.Net.Http.Json
+@inject IHttpClientFactory HttpClientFactory
+@inject NavigationManager Navigation
+
+<h3>Đăng ký</h3>
+
+<div class="card p-4 w-50">
+    <div class="form-group mb-2">
+        <label>Email</label>
+        <input @bind="email" class="form-control" />
+    </div>
+    <div class="form-group mb-2">
+        <label>Mật khẩu</label>
+        <input type="password" @bind="password" class="form-control" />
+    </div>
+    <div class="form-group mb-3">
+        <label>Xác nhận mật khẩu</label>
+        <input type="password" @bind="confirmPassword" class="form-control" />
+    </div>
+    <button class="btn btn-primary" @onclick="HandleRegister">Đăng ký</button>
+    <p>Đã có tài khoản? <a href="/login">Đăng nhập</a></p>
+</div>
+
+@code {
+    private string email = "";
+    private string password = "";
+    private string confirmPassword = "";
+
+    private async Task HandleRegister()
+    {
+        if (password != confirmPassword)
+        {
+            Console.WriteLine("Mật khẩu xác nhận không khớp.");
+            return;
+        }
+
+        try
+        {
+            var client = HttpClientFactory.CreateClient("ServerAPI");
+            var payload = new { Email = email, Password = password };
+
+            // POST JSON (yêu cầu using System.Net.Http.Json)
+            var response = await client.PostAsJsonAsync("api/auth/register", payload);
+
+            if (response.IsSuccessStatusCode)
+            {
+                Console.WriteLine("Đăng ký thành công. Vui lòng đăng nhập.");
+                Navigation.NavigateTo("/login", forceLoad: true);
+            }
+            else
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                Console.WriteLine("Đăng ký thất bại: " + content);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Lỗi: " + ex.Message);
+        }
+    }
+}

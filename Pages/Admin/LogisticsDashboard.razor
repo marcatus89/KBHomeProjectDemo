@@ -1,0 +1,151 @@
+@page "/admin/logistics"
+@attribute [Authorize(Roles = "Admin, Logistics")]
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Navigation
+
+<h3>Bảng điều khiển Logistics</h3>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <span class="oi oi-truck"></span> Đơn hàng cần giao (Logistics)
+            </div>
+            <div class="card-body">
+                @if (ordersToDeliver == null)
+                {
+                    <LoadingSpinner />
+                }
+                else if (!ordersToDeliver.Any())
+                {
+                    <div class="alert alert-info">Không có đơn hàng nào cần giao.</div>
+                }
+                else
+                {
+                    <ul class="list-group">
+                        @foreach (var o in ordersToDeliver)
+                        {
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <div>
+                                    <div class="fw-semibold">Đơn #@o.Id - @o.CustomerName</div>
+                                    <div class="text-muted">Ngày: @o.OrderDate.ToString("dd/MM/yyyy HH:mm") • Trạng thái: @o.Status</div>
+                                </div>
+
+                                <div class="d-flex gap-2">
+                                    <a class="btn btn-sm btn-secondary" href="@($"/admin/orders/{o.Id}")">Chi tiết</a>
+
+                                    @if (shippedOrderMap != null && shippedOrderMap.ContainsKey(o.Id))
+                                    {
+                                        <a class="btn btn-sm btn-info" href="@($"/admin/shipments/{shippedOrderMap[o.Id]}")">Xem Vận đơn</a>
+                                    }
+                                    else
+                                    {
+                                        <a class="btn btn-sm btn-primary" href="@($"/admin/shipments/create/{o.Id}")">Tạo Vận đơn</a>
+                                    }
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-secondary text-white">
+                <span class="oi oi-list-rich"></span> Giao hàng đang xử lý / Đang giao
+            </div>
+            <div class="card-body">
+                @if (inProgress == null)
+                {
+                    <LoadingSpinner />
+                }
+                else if (!inProgress.Any())
+                {
+                    <div class="alert alert-info">Không có đơn đang giao.</div>
+                }
+                else
+                {
+                    <ul class="list-group">
+                        @foreach (var o in inProgress)
+                        {
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <div>
+                                    <div class="fw-semibold">Đơn #@o.Id - @o.CustomerName</div>
+                                    <div class="text-muted">Ngày: @o.OrderDate.ToString("dd/MM/yyyy HH:mm") • Trạng thái: @o.Status</div>
+                                </div>
+                                <a class="btn btn-sm btn-secondary" href="@($"/admin/orders/{o.Id}")">Xem</a>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<Order>? ordersToDeliver;
+    private List<Order>? inProgress;
+    // map orderId -> shipmentId (nếu đã có)
+    private Dictionary<int,int>? shippedOrderMap;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var toDeliverStatuses = new[] { "Sẵn sàng giao hàng", "Đã thanh toán", "Chờ xác nhận" };
+        var inProgressStatuses = new[] { "Đang giao" };
+
+        try
+        {
+            // 1) load orders
+            await using (var db1 = await DbFactory.CreateDbContextAsync())
+            {
+                ordersToDeliver = await db1.Orders
+                    .AsNoTracking()
+                    .Where(o => toDeliverStatuses.Contains(o.Status))
+                    .OrderBy(o => o.OrderDate)
+                    .Take(200)
+                    .ToListAsync();
+            }
+
+            // 2) load inProgress
+            await using (var db2 = await DbFactory.CreateDbContextAsync())
+            {
+                inProgress = await db2.Orders
+                    .AsNoTracking()
+                    .Where(o => inProgressStatuses.Contains(o.Status))
+                    .OrderBy(o => o.OrderDate)
+                    .Take(200)
+                    .ToListAsync();
+            }
+
+            // 3) find shipments for ordersToDeliver (if any)
+            if (ordersToDeliver?.Any() == true)
+            {
+                var orderIds = ordersToDeliver.Select(x => x.Id).ToArray();
+                await using var db3 = await DbFactory.CreateDbContextAsync();
+                var shipments = await db3.Shipments
+                    .AsNoTracking()
+                    .Where(s => orderIds.Contains(s.OrderId))
+                    .ToListAsync();
+
+                shippedOrderMap = shipments.ToDictionary(s => s.OrderId, s => s.Id);
+            }
+            else
+            {
+                shippedOrderMap = new Dictionary<int,int>();
+            }
+
+            Console.WriteLine($"[LogisticsDashboard] Loaded deliver={ordersToDeliver?.Count ?? 0}, inProgress={inProgress?.Count ?? 0}, shipped={shippedOrderMap?.Count ?? 0}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[LogisticsDashboard] Error loading data: " + ex);
+            ordersToDeliver = new List<Order>();
+            inProgress = new List<Order>();
+            shippedOrderMap = new Dictionary<int,int>();
+        }
+    }
+}

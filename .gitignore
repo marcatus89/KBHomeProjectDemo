@@ -1,0 +1,26 @@
+## Build folders
+bin/
+obj/
+out/
+
+## User-specific files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.vscode/
+
+## OS generated files
+.DS_Store
+Thumbs.db
+
+## Visual Studio
+.vs/
+*.dbmdl
+
+## Others
+*.dll
+*.pdb
+*.cache
+*.log
+*.json

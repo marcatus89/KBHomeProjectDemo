@@ -1,0 +1,143 @@
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.Extensions.Logging
+@using System.Linq
+@implements IDisposable
+
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject CartService CartSvc
+@inject ILogger<Header> Logger
+
+<header class="app-header">
+    <div class="header-top">
+        <div class="container d-flex justify-content-between align-items-center">
+            <div class="contact-info">
+                <span class="oi oi-phone me-1"></span> +84 93 189 48 68
+                <span class="mx-3">|</span>
+                <span class="oi oi-envelope-closed me-1"></span> contact@kbhome.com.vn
+            </div>
+            <div class="header-top-right">
+                <LoginDisplay />
+            </div>
+        </div>
+    </div>
+
+    <div class="header-main">
+        <div class="container d-flex justify-content-between align-items-center">
+            <a href="/" class="header-logo">
+                <img src="/images/logo.png" alt="KBHOME Logo" />
+            </a>
+            <div class="header-search flex-grow-1 mx-4">
+                <SearchForm />
+            </div>
+            <div class="header-actions d-flex align-items-center">
+                <NavLink class="action-item d-flex align-items-center" href="/gio-hang">
+                    <span class="oi oi-cart me-1"></span>
+                    <span>Giỏ hàng (@CartTotalQuantity())</span>
+                </NavLink>
+            </div>
+        </div>
+    </div>
+
+    <nav class="header-nav">
+        <div class="container">
+            <ul class="nav-menu-list">
+                <li><NavLink class="nav-link" href="" Match="NavLinkMatch.All">Trang chủ</NavLink></li>
+                <li class="dropdown">
+                    <NavLink class="nav-link" href="san-pham">Sản phẩm</NavLink>
+                    <div class="dropdown-content">
+                        @if (categories != null && categories.Any())
+                        {
+                            @foreach (var category in categories)
+                            {
+                                <a href="@($"/category/{category.Id}")">@category.Name</a>
+                            }
+                        }
+                        else
+                        {
+                            <span class="text-muted px-2">Không có danh mục</span>
+                        }
+                    </div>
+                </li>
+                <li><NavLink class="nav-link" href="#">Tin tức</NavLink></li>
+                <li><NavLink class="nav-link" href="#">Liên hệ</NavLink></li>
+
+                <AuthorizeView Roles="Admin, Sales, Warehouse, Logistics, Purchasing">
+                    <li><NavLink class="nav-link" href="admin">Quản trị</NavLink></li>
+                </AuthorizeView>
+            </ul>
+        </div>
+    </nav>
+</header>
+
+@code {
+    private List<Category>? categories;
+    private bool subscribed = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Debug: in ra hash của CartService để kiểm tra instance
+        Console.WriteLine($"[Header] OnInitialized. CartSvc hash={CartSvc?.GetHashCode() ?? 0}, totalQty={CartSvc?.Items.Sum(i => i.Quantity) ?? 0}");
+        SubscribeCart();
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            categories = await db.Categories
+                                 .AsNoTracking()
+                                 .OrderBy(c => c.Name)
+                                 .ToListAsync();
+            Console.WriteLine($"[Header] Loaded {categories.Count} categories.");
+        }
+        catch (Exception ex)
+        {
+            // Không để lỗi load categories phá toàn header
+            Logger.LogWarning(ex, "Failed to load categories for header.");
+            categories = new List<Category>();
+        }
+    }
+
+    private int CartTotalQuantity()
+    {
+        try
+        {
+            return CartSvc?.Items?.Sum(i => i.Quantity) ?? 0;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Error calculating cart total quantity");
+            return 0;
+        }
+    }
+
+    private void SubscribeCart()
+    {
+        if (!subscribed)
+        {
+            CartSvc.OnChange += StateHasChanged;
+            subscribed = true;
+            Console.WriteLine($"[Header] Subscribed to CartSvc.OnChange (CartSvc hash={CartSvc?.GetHashCode() ?? 0})");
+        }
+    }
+
+    private void UnsubscribeCart()
+    {
+        if (subscribed)
+        {
+            try
+            {
+                CartSvc.OnChange -= StateHasChanged;
+                Console.WriteLine("[Header] Unsubscribed from CartSvc.OnChange");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Failed to unsubscribe CartSvc.OnChange");
+            }
+            subscribed = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        UnsubscribeCart();
+    }
+}

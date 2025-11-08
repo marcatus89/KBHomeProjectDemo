@@ -1,0 +1,46 @@
+@page "/admin"
+@attribute [Authorize(Roles = "Admin, Sales, Warehouse, Logistics, Purchasing")]
+
+<h3>Chào mừng đến Trang Quản trị</h3>
+
+<p>Đây là khu vực quản lý nội bộ dành cho các phòng ban.</p>
+
+<div class="mt-4 d-grid gap-2 d-md-block">
+    
+    @* Các chức năng chỉ Admin mới thấy *@
+    <AuthorizeView Roles="Admin">
+         <a href="/admin/dashboard" class="btn btn-primary">Dashboard</a>
+        <a href="/admin/products" class="btn btn-info">Quản lý Sản phẩm</a>
+        <a href="/admin/users" class="btn btn-success">Quản lý Người dùng</a>
+        <a href="/admin/categories" class="btn btn-secondary">Quản lý Danh mục</a>
+    </AuthorizeView>
+
+    @* Chức năng xem toàn bộ đơn hàng *@
+    <AuthorizeView Roles="Admin, Sales, Warehouse, Logistics">
+        <a href="/admin/orders" class="btn btn-warning">Quản lý Đơn hàng (Toàn bộ)</a>
+    </AuthorizeView>
+    
+    @* Các chức năng của Phân hệ Mua hàng *@
+    <AuthorizeView Roles="Admin, Purchasing">
+         <a href="/admin/suppliers" class="btn btn-dark">Quản lý Nhà cung cấp</a>
+    </AuthorizeView>
+    <AuthorizeView Roles="Admin, Purchasing, Warehouse">
+         <a href="/admin/purchase-orders" class="btn btn-primary">Quản lý Đơn nhập hàng</a>
+    </AuthorizeView>
+    
+    @* Link đến các Bảng điều khiển của từng phân hệ *@
+    <AuthorizeView Roles="Admin, Sales">
+         <a href="/admin/sales" class="btn" style="background-color: #dc22b1; color: white;">Phân hệ Sales</a>
+    </AuthorizeView>
+    
+    <AuthorizeView Roles="Admin, Warehouse">
+         <a href="/admin/warehouse" class="btn" style="background-color: #fd7e14; color: white;">Phân hệ Kho</a>
+         <a href="/admin/stock-take" class="btn" style="background-color: #585aeb; color: rgb(241, 236, 236);">Kiểm kê Kho</a>
+    </AuthorizeView>
+
+    <AuthorizeView Roles="Admin, Logistics">
+         <a href="/admin/logistics" class="btn" style="background-color: #6f42c1; color: white;">Phân hệ Giao nhận</a>
+    </AuthorizeView>
+
+</div>
+
