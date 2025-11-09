@@ -17,7 +17,9 @@ namespace DoAnTotNghiep.Models
         
         public Category? Category { get; set; }
 
-        
+        [MaxLength(2000, ErrorMessage = "Mô tả không được quá 2000 ký tự.")]
+        [DataType(DataType.MultilineText)]
+        public string? Description { get; set; }
         [Range(0, int.MaxValue, ErrorMessage = "Số lượng tồn kho không thể là số âm.")]
         public int StockQuantity { get; set; }
         public bool IsVisible { get; set; } = true;

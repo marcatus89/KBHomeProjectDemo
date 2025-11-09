@@ -35,7 +35,7 @@ namespace DoAnTotNghiep.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Categories");
+                    b.ToTable("Categories", (string)null);
                 });
 
             modelBuilder.Entity("DoAnTotNghiep.Models.InventoryAdjustmentRequest", b =>
@@ -89,7 +89,7 @@ namespace DoAnTotNghiep.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("InventoryAdjustmentRequests");
+                    b.ToTable("InventoryAdjustmentRequests", (string)null);
                 });
 
             modelBuilder.Entity("DoAnTotNghiep.Models.InventoryLog", b =>
@@ -123,7 +123,7 @@ namespace DoAnTotNghiep.Migrations
 
                     b.HasIndex("ProductId");
 
-                    b.ToTable("InventoryLogs");
+                    b.ToTable("InventoryLogs", (string)null);
                 });
 
             modelBuilder.Entity("DoAnTotNghiep.Models.Order", b =>
@@ -168,7 +168,7 @@ namespace DoAnTotNghiep.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("Orders");
+                    b.ToTable("Orders", (string)null);
                 });
 
             modelBuilder.Entity("DoAnTotNghiep.Models.OrderDetail", b =>
@@ -200,7 +200,7 @@ namespace DoAnTotNghiep.Migrations
 
                     b.HasIndex("OrderId");
 
-                    b.ToTable("OrderDetails");
+                    b.ToTable("OrderDetails", (string)null);
                 });
 
             modelBuilder.Entity("DoAnTotNghiep.Models.Product", b =>
@@ -235,7 +235,7 @@ namespace DoAnTotNghiep.Migrations
 
                     b.HasIndex("CategoryId");
 
-                    b.ToTable("Products");
+                    b.ToTable("Products", (string)null);
                 });
 
             modelBuilder.Entity("DoAnTotNghiep.Models.PurchaseOrder", b =>
@@ -267,7 +267,7 @@ namespace DoAnTotNghiep.Migrations
 
                     b.HasIndex("SupplierId");
 
-                    b.ToTable("PurchaseOrders");
+                    b.ToTable("PurchaseOrders", (string)null);
                 });
 
             modelBuilder.Entity("DoAnTotNghiep.Models.PurchaseOrderItem", b =>
@@ -297,7 +297,7 @@ namespace DoAnTotNghiep.Migrations
 
                     b.HasIndex("PurchaseOrderId");
 
-                    b.ToTable("PurchaseOrderItems");
+                    b.ToTable("PurchaseOrderItems", (string)null);
                 });
 
             modelBuilder.Entity("DoAnTotNghiep.Models.Shipment", b =>
@@ -328,7 +328,7 @@ namespace DoAnTotNghiep.Migrations
                     b.HasIndex("OrderId")
                         .IsUnique();
 
-                    b.ToTable("Shipments");
+                    b.ToTable("Shipments", (string)null);
                 });
 
             modelBuilder.Entity("DoAnTotNghiep.Models.Supplier", b =>
@@ -354,7 +354,7 @@ namespace DoAnTotNghiep.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Suppliers");
+                    b.ToTable("Suppliers", (string)null);
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole", b =>

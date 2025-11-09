@@ -41,31 +41,31 @@ Mật khẩu
 
 Admin
 
-admin@mybathroom.com
+admin@kbhome.vn
 
 Password123!
 
 Sales
 
-sales@mybathroom.com
+sales@kbhome.vn
 
 Password123!
 
 Purchasing
 
-purchasing@mybathroom.com
+purchasing@kbhome.vn
 
 Password123!
 
 Warehouse
 
-warehouse@mybathroom.com
+warehouse@kbhome.vn
 
 Password123!
 
 Logistics
 
-logistics@mybathroom.com
+logistics@kbhome.vn
 
 Password123!
 
@@ -89,7 +89,7 @@ Quản lý Người dùng: Tạo tài khoản nhân viên mới và phân quyề
 Có thể can thiệp và thay đổi trạng thái của bất kỳ đơn hàng/đơn nhập hàng nào.
 
 b. Phân hệ Sales (Kinh doanh)
-Tài khoản: sales@mybathroom.com
+Tài khoản: sales@kbhome.vn
 
 Nhiệm vụ:
 
@@ -100,7 +100,7 @@ Danh sách các đơn hàng có trạng thái "Chờ xác nhận" sẽ hiện ra
 Nhấn "Xem và Xác nhận", liên hệ với khách hàng, thêm ghi chú (nếu cần) và cập nhật trạng thái thành "Chờ thanh toán".
 
 c. Phân hệ Kho (Warehouse)
-Tài khoản: warehouse@mybathroom.com
+Tài khoản: warehouse@kbhome.vn
 
 Nhiệm vụ:
 
@@ -111,7 +111,7 @@ Nhập kho: Xem các "Đơn nhập hàng đang chờ", vào chi tiết và nhấ
 Xuất kho: Xem các "Đơn hàng cần xử lý" (đã được thanh toán), vào chi tiết và cập nhật trạng thái thành "Sẵn sàng giao hàng" để chuyển cho Giao nhận.
 
 d. Phân hệ Mua hàng (Purchasing)
-Tài khoản: purchasing@mybathroom.com
+Tài khoản: purchasing@kbhome.vn
 
 Nhiệm vụ:
 
@@ -122,7 +122,7 @@ Quản lý Nhà cung cấp: Thêm/sửa thông tin các nhà cung cấp.
 Quản lý Đơn nhập hàng: Tạo một đơn nhập hàng mới, chọn nhà cung cấp và các sản phẩm cần nhập thêm.
 
 e. Phân hệ Giao nhận (Logistics)
-Tài khoản: logistics@mybathroom.com
+Tài khoản: logistics@kbhome.vn
 
 Nhiệm vụ:
 

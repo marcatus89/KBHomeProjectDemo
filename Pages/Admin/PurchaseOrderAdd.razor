@@ -4,6 +4,7 @@
 @inject ApplicationDbContext DbContext
 @inject NavigationManager Navigation
 @inject PurchaseOrderService PurchaseOrderSvc
+@inject ToastService ToastSvc
 
 <h3>Tạo Đơn nhập hàng mới</h3>
 
@@ -100,18 +101,63 @@
 
     private void AddItem()
     {
+        // chỉ thêm nếu đã chọn sản phẩm & số lượng hợp lệ
         if (newItem.ProductId > 0 && newItem.Quantity > 0)
         {
-            newPurchaseOrder.Items.Add(newItem);
-            newItem = new(); // Reset for next item
+            // clone item để tránh reuse cùng object
+            var itemToAdd = new PurchaseOrderItem
+            {
+                ProductId = newItem.ProductId,
+                Quantity = newItem.Quantity,
+                UnitPrice = newItem.UnitPrice,
+                // đảm bảo ReceivedQuantity mặc định bằng Quantity
+                ReceivedQuantity = newItem.Quantity
+            };
+
+            newPurchaseOrder.Items.Add(itemToAdd);
+
+            // reset form item
+            newItem = new PurchaseOrderItem();
+        }
+        else
+        {
+            ToastSvc.ShowToast("Vui lòng chọn sản phẩm và nhập số lượng lớn hơn 0.", ToastLevel.Warning);
         }
     }
 
     private async Task HandleCreatePurchaseOrder()
     {
-        // Đảm bảo sử dụng service để tạo đơn nhập hàng
-        await PurchaseOrderSvc.CreatePurchaseOrderAsync(newPurchaseOrder);
-        Navigation.NavigateTo("/admin/purchase-orders");
+        // 1) Kiểm tra đã chọn nhà cung cấp
+        if (newPurchaseOrder.SupplierId <= 0)
+        {
+            ToastSvc.ShowToast("Vui lòng chọn Nhà cung cấp trước khi tạo đơn.", ToastLevel.Warning);
+            return;
+        }
+
+        // 2) Kiểm tra ít nhất 1 sản phẩm
+        if (newPurchaseOrder.Items == null || !newPurchaseOrder.Items.Any())
+        {
+            ToastSvc.ShowToast("Vui lòng thêm ít nhất 1 sản phẩm vào phiếu.", ToastLevel.Warning);
+            return;
+        }
+
+        // 3) Đảm bảo ReceivedQuantity cho mọi item
+        foreach (var it in newPurchaseOrder.Items)
+        {
+            if (it.ReceivedQuantity <= 0)
+                it.ReceivedQuantity = it.Quantity;
+        }
+
+        try
+        {
+            await PurchaseOrderSvc.CreatePurchaseOrderAsync(newPurchaseOrder);
+            ToastSvc.ShowToast("Đã tạo Đơn nhập hàng thành công.", ToastLevel.Success);
+            Navigation.NavigateTo("/admin/purchase-orders");
+        }
+        catch (Exception ex)
+        {
+            // hiển thị lỗi cụ thể
+            ToastSvc.ShowToast($"Lỗi khi tạo đơn: {ex.Message}", ToastLevel.Error);
+        }
     }
 }
-

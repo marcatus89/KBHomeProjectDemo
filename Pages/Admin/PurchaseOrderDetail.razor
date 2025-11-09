@@ -33,7 +33,8 @@ else
                 <tr>
                     <th>STT</th>
                     <th>Tên Sản phẩm</th>
-                    <th>Số lượng</th>
+                    <th>Số lượng đặt</th>
+                    <th>Số lượng nhận</th>
                     <th>Đơn giá</th>
                     <th>Thành tiền</th>
                 </tr>
@@ -45,12 +46,14 @@ else
                 }
                 @foreach (var item in purchaseOrder.Items)
                 {
-                    var subtotal = item.Quantity * item.UnitPrice;
+                    var qtyReceived = item.ReceivedQuantity;
+                    var subtotal = qtyReceived * item.UnitPrice;
                     total += subtotal;
                     <tr>
                         <td>@(count++)</td>
                         <td>@item.Product?.Name</td>
                         <td>@item.Quantity</td>
+                        <td>@qtyReceived</td>
                         <td>@item.UnitPrice.ToString("n0")</td>
                         <td>@subtotal.ToString("n0")</td>
                     </tr>
@@ -58,7 +61,7 @@ else
             </tbody>
             <tfoot>
                 <tr>
-                    <td colspan="4" class="text-end"><strong>Tổng cộng</strong></td>
+                    <td colspan="5" class="text-end"><strong>Tổng cộng</strong></td>
                     <td><strong>@total.ToString("n0") VNĐ</strong></td>
                 </tr>
             </tfoot>
@@ -82,13 +85,20 @@ else
                 <strong>Số phiếu:</strong> @purchaseOrder.PurchaseOrderNumber |
                 <strong>Nhà cung cấp:</strong> @purchaseOrder.Supplier?.Name |
                 <strong>Trạng thái:</strong>
-                <span class="badge @(purchaseOrder.Status == "Đã nhận hàng" ? "bg-success" : "bg-warning text-dark")">@purchaseOrder.Status</span>
+                <!-- Sửa: nếu trạng thái bắt đầu bằng "Đã nhận hàng" (bao gồm "Đã nhận hàng (có chênh lệch)") => bg-success -->
+                <span class="badge @(purchaseOrder.Status != null && purchaseOrder.Status.StartsWith("Đã nhận hàng") ? "bg-success" : purchaseOrder.Status == "Chờ phê duyệt" ? "bg-info text-dark" : "bg-warning text-dark")">@purchaseOrder.Status</span>
             </div>
             <div>
                 <button class="btn btn-outline-secondary me-2" @onclick="Print"><span class="oi oi-print"></span> In Phiếu</button>
+                <br>
                 @if (canReceive)
                 {
-                    <button class="btn btn-success" @onclick="HandleReceiveItems" disabled="@isProcessing">Xác nhận đã nhận đủ hàng</button>
+                    <button class="btn btn-success me-2" @onclick="HandleReceiveItems" disabled="@isProcessing">Xác nhận</button>
+                }
+
+                @if (isAdmin && purchaseOrder.Status == "Chờ phê duyệt")
+                {
+                    <button class="btn btn-primary" @onclick="AdminApprove" disabled="@isProcessing">Phê duyệt và Nhập</button>
                 }
             </div>
         </div>
@@ -100,6 +110,7 @@ else
                     <tr>
                         <th>Sản phẩm</th>
                         <th>Số lượng đặt</th>
+                        <th>Số lượng nhận</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -108,6 +119,13 @@ else
                         <tr>
                             <td>@item.Product?.Name</td>
                             <td>@item.Quantity</td>
+                            <td style="width:180px;">
+                                <input type="number"
+                                       class="form-control"
+                                       min="0"
+                                       value="@item.ReceivedQuantity"
+                                       @oninput="@(e => OnReceivedQtyChanged(item, e))" />
+                            </td>
                         </tr>
                     }
                 </tbody>
@@ -127,12 +145,18 @@ else
     private bool isLoading = true;
     private bool isProcessing = false;
     private bool canReceive = false;
+    private bool isAdmin = false;
 
     protected override async Task OnInitializedAsync()
     {
         isLoading = true;
         try
         {
+            // thông tin user & role
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = auth.User;
+            isAdmin = user?.IsInRole("Admin") ?? false;
+
             await using var db = await DbFactory.CreateDbContextAsync();
             purchaseOrder = await db.PurchaseOrders
                                     .Include(po => po.Supplier)
@@ -140,11 +164,22 @@ else
                                         .ThenInclude(i => i.Product)
                                     .FirstOrDefaultAsync(po => po.Id == PurchaseOrderId);
 
-            canReceive = purchaseOrder != null && purchaseOrder.Status == "Đã đặt hàng";
+            if (purchaseOrder != null)
+            {
+                // Nếu dữ liệu cũ (ReceivedQuantity <= 0), gán mặc định bằng Quantity
+                foreach (var it in purchaseOrder.Items)
+                {
+                    if (it.ReceivedQuantity <= 0)
+                        it.ReceivedQuantity = it.Quantity;
+                }
+
+                canReceive = purchaseOrder.Status == "Đã đặt hàng";
+            }
         }
         catch (Exception ex)
         {
             Console.WriteLine("[PurchaseOrderDetail] Load error: " + ex);
+            ToastSvc.ShowToast("Lỗi khi tải phiếu nhập.", ToastLevel.Error);
         }
         finally
         {
@@ -152,23 +187,112 @@ else
         }
     }
 
+    // Không cho nhận số âm và cập nhật giá trị UI
+    private void OnReceivedQtyChanged(PurchaseOrderItem item, ChangeEventArgs e)
+    {
+        if (e?.Value == null)
+        {
+            item.ReceivedQuantity = 0;
+            return;
+        }
+
+        if (!int.TryParse(e.Value.ToString(), out int val))
+        {
+            item.ReceivedQuantity = 0;
+            return;
+        }
+
+        if (val < 0)
+        {
+            ToastSvc.ShowToast("Số lượng không thể là số âm. Đã đặt về 0.", ToastLevel.Warning);
+            item.ReceivedQuantity = 0;
+        }
+        else
+        {
+            item.ReceivedQuantity = val;
+        }
+    }
+
     private async Task HandleReceiveItems()
     {
         if (purchaseOrder == null) return;
 
-        if (purchaseOrder.Status == "Đã nhận hàng")
+        if (purchaseOrder.Status == "Đã nhận hàng" || (purchaseOrder.Status != null && purchaseOrder.Status.StartsWith("Đã nhận hàng")))
         {
             ToastSvc.ShowToast("Phiếu đã được nhận trước đó.", ToastLevel.Info);
             return;
         }
 
-        var ok = await JSRuntime.InvokeAsync<bool>("confirm", $"Xác nhận đã nhận đủ {purchaseOrder.Items.Sum(i => i.Quantity)} mặt hàng cho phiếu {purchaseOrder.PurchaseOrderNumber}?");
-        if (!ok) return;
+        // Kiểm tra chênh lệch
+        var mismatchItems = purchaseOrder.Items.Where(i => i.ReceivedQuantity != i.Quantity).ToList();
+        if (mismatchItems.Any() && !isAdmin)
+        {
+            // nếu không phải admin, gửi yêu cầu phê duyệt
+            var ok = await JSRuntime.InvokeAsync<bool>("confirm", $"Có {mismatchItems.Count} sản phẩm có chênh lệch giữa số lượng đặt và số lượng nhận. Bạn muốn gửi yêu cầu phê duyệt đến Admin?");
+            if (!ok) return;
+
+            await RequestApproval();
+            return;
+        }
+
+        // Nếu không chênh lệch hoặc là admin -> thực hiện nhận luôn
+        await ReceiveAndUpdateStock(purchaseOrder.Items, purchaseOrder.PurchaseOrderNumber);
+    }
+
+    // Lưu ReceivedQuantity và đặt trạng thái "Chờ phê duyệt"
+    private async Task RequestApproval()
+    {
+        if (purchaseOrder == null) return;
 
         isProcessing = true;
         try
         {
-            // lấy thông tin người thao tác
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var poDb = await db.PurchaseOrders
+                                .Include(po => po.Items)
+                                .FirstOrDefaultAsync(po => po.Id == purchaseOrder.Id);
+            if (poDb == null)
+            {
+                ToastSvc.ShowToast("Không tìm thấy phiếu trên cơ sở dữ liệu.", ToastLevel.Error);
+                return;
+            }
+
+            // Lưu ReceivedQuantity từ UI xuống DB (đảm bảo không âm)
+            foreach (var it in poDb.Items)
+            {
+                var uiItem = purchaseOrder.Items.FirstOrDefault(x => x.Id == it.Id);
+                if (uiItem != null)
+                {
+                    if (uiItem.ReceivedQuantity < 0) uiItem.ReceivedQuantity = 0;
+                    it.ReceivedQuantity = uiItem.ReceivedQuantity;
+                }
+            }
+
+            poDb.Status = "Chờ phê duyệt";
+            db.PurchaseOrders.Update(poDb);
+            await db.SaveChangesAsync();
+
+            purchaseOrder.Status = poDb.Status;
+            ToastSvc.ShowToast("Đã gửi yêu cầu phê duyệt đến Admin.", ToastLevel.Info);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[PurchaseOrderDetail] RequestApproval error: " + ex);
+            ToastSvc.ShowToast("Lỗi khi gửi yêu cầu phê duyệt.", ToastLevel.Error);
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    // Thực hiện cập nhật tồn kho theo ReceivedQuantity và ghi InventoryLog
+    private async Task ReceiveAndUpdateStock(ICollection<PurchaseOrderItem> items, string purchaseOrderNumber)
+    {
+        isProcessing = true;
+        try
+        {
             var auth = await AuthStateProvider.GetAuthenticationStateAsync();
             var user = auth.User;
             var receiver = user?.Identity?.Name ?? "Hệ thống";
@@ -177,7 +301,6 @@ else
             await using var tx = await db.Database.BeginTransactionAsync();
             try
             {
-                // reload purchaseOrder in this context (for update)
                 var po = await db.PurchaseOrders
                                  .Include(po2 => po2.Items)
                                  .FirstOrDefaultAsync(po2 => po2.Id == purchaseOrder.Id);
@@ -189,34 +312,52 @@ else
                     return;
                 }
 
-                if (po.Status == "Đã nhận hàng")
+                if (po.Status == "Đã nhận hàng" || (po.Status != null && po.Status.StartsWith("Đã nhận hàng")))
                 {
                     ToastSvc.ShowToast("Phiếu đã được nhận trước đó.", ToastLevel.Info);
                     await tx.RollbackAsync();
                     return;
                 }
 
-                // cập nhật tồn kho từng sản phẩm và ghi log (có OldQuantity)
+                // cập nhật ReceivedQuantity từ UI xuống DB item
+                foreach (var uiItem in items)
+                {
+                    var dbItem = po.Items.FirstOrDefault(i => i.Id == uiItem.Id);
+                    if (dbItem != null)
+                    {
+                        if (uiItem.ReceivedQuantity < 0)
+                        {
+                            ToastSvc.ShowToast("Số lượng nhận không thể là số âm.", ToastLevel.Error);
+                            await tx.RollbackAsync();
+                            return;
+                        }
+                        dbItem.ReceivedQuantity = uiItem.ReceivedQuantity;
+                    }
+                }
+
+                // kiểm tra có chênh lệch hay không (sau khi đã gán ReceivedQuantity vào db)
+                bool hasMismatch = po.Items.Any(i => i.ReceivedQuantity != i.Quantity);
+
+                // cập nhật tồn kho theo ReceivedQuantity
                 foreach (var item in po.Items)
                 {
                     var product = await db.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId);
                     if (product == null)
                     {
-                        // nếu thiếu product: rollback và báo lỗi
                         ToastSvc.ShowToast($"Không tìm thấy sản phẩm ID={item.ProductId}. Hủy thao tác.", ToastLevel.Error);
                         await tx.RollbackAsync();
                         return;
                     }
 
                     int oldQty = product.StockQuantity;
-                    product.StockQuantity += item.Quantity;
+                    product.StockQuantity += item.ReceivedQuantity;
                     db.Products.Update(product);
 
                     var log = new InventoryLog
                     {
                         ProductId = product.Id,
-                        OldQuantity = oldQty,                        // <<-- ghi tồn cũ
-                        QuantityChange = item.Quantity,              // + vì nhập
+                        OldQuantity = oldQty,
+                        QuantityChange = item.ReceivedQuantity,
                         NewQuantity = product.StockQuantity,
                         Reason = $"Nhập hàng từ phiếu {po.PurchaseOrderNumber} (nhận bởi {receiver})",
                         Timestamp = DateTime.UtcNow
@@ -224,16 +365,15 @@ else
                     await db.InventoryLogs.AddAsync(log);
                 }
 
-                // chuyển trạng thái phiếu
-                po.Status = "Đã nhận hàng";
+                // đặt trạng thái tuỳ theo có chênh lệch hay không
+                po.Status = hasMismatch ? "Đã nhận hàng (có chênh lệch)" : "Đã nhận hàng";
                 db.PurchaseOrders.Update(po);
 
                 await db.SaveChangesAsync();
                 await tx.CommitAsync();
 
-                // cập nhật UI
-                purchaseOrder.Status = "Đã nhận hàng";
-                // cập nhật số tồn hiển thị trong product objects nếu cần
+                // cập nhật UI: dùng trạng thái thực tế từ DB
+                purchaseOrder.Status = po.Status;
                 foreach (var pitem in purchaseOrder.Items)
                 {
                     var prodInDb = await db.Products.AsNoTracking().FirstOrDefaultAsync(p => p.Id == pitem.ProductId);
@@ -242,7 +382,10 @@ else
                 }
 
                 canReceive = false;
-                ToastSvc.ShowToast($"✅ Đã nhận hàng cho phiếu {purchaseOrder.PurchaseOrderNumber}.", ToastLevel.Success);
+                if (hasMismatch)
+                    ToastSvc.ShowToast($"✅ Đã nhận hàng cho phiếu {purchaseOrder.PurchaseOrderNumber}. Lưu ý: có chênh lệch giữa số lượng đặt và số lượng nhận.", ToastLevel.Success);
+                else
+                    ToastSvc.ShowToast($"✅ Đã nhận hàng cho phiếu {purchaseOrder.PurchaseOrderNumber}.", ToastLevel.Success);
             }
             catch (Exception exInner)
             {
@@ -256,6 +399,23 @@ else
             isProcessing = false;
             StateHasChanged();
         }
+    }
+
+    // Admin phê duyệt
+    private async Task AdminApprove()
+    {
+        if (!isAdmin)
+        {
+            ToastSvc.ShowToast("Bạn không có quyền phê duyệt.", ToastLevel.Warning);
+            return;
+        }
+
+        if (purchaseOrder == null) return;
+
+        var ok = await JSRuntime.InvokeAsync<bool>("confirm", "Xác nhận phê duyệt và nhập số lượng nhận đã ghi?");
+        if (!ok) return;
+
+        await ReceiveAndUpdateStock(purchaseOrder.Items, purchaseOrder.PurchaseOrderNumber);
     }
 
     private async Task Print()

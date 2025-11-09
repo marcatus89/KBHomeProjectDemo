@@ -1,62 +1,144 @@
 @page "/register"
 @using System.Net.Http.Json
+@using System.ComponentModel.DataAnnotations
 @inject IHttpClientFactory HttpClientFactory
 @inject NavigationManager Navigation
+@inject ToastService ToastSvc
 
 <h3>Đăng ký</h3>
 
-<div class="card p-4 w-50">
-    <div class="form-group mb-2">
-        <label>Email</label>
-        <input @bind="email" class="form-control" />
-    </div>
-    <div class="form-group mb-2">
-        <label>Mật khẩu</label>
-        <input type="password" @bind="password" class="form-control" />
-    </div>
-    <div class="form-group mb-3">
-        <label>Xác nhận mật khẩu</label>
-        <input type="password" @bind="confirmPassword" class="form-control" />
-    </div>
-    <button class="btn btn-primary" @onclick="HandleRegister">Đăng ký</button>
-    <p>Đã có tài khoản? <a href="/login">Đăng nhập</a></p>
+<div class="card p-4" style="max-width:520px">
+    <EditForm Model="@model" OnValidSubmit="HandleRegister">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="mb-2">
+            <label>Email</label>
+            <InputText class="form-control" @bind-Value="model.Email" />
+            <ValidationMessage For="@(()=> model.Email)" />
+        </div>
+
+        <div class="mb-2">
+            <label>Mật khẩu</label>
+            <InputText type="password" class="form-control" @bind-Value="model.Password" />
+            <ValidationMessage For="@(()=> model.Password)" />
+        </div>
+
+        <div class="mb-3">
+            <label>Xác nhận mật khẩu</label>
+            <InputText type="password" class="form-control" @bind-Value="model.ConfirmPassword" />
+            <ValidationMessage For="@(()=> model.ConfirmPassword)" />
+        </div>
+
+        <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary">Đăng ký</button>
+            <button type="button" class="btn btn-secondary" @onclick="BackToLogin">Quay lại Đăng nhập</button>
+        </div>
+
+        @if (!string.IsNullOrEmpty(serverError))
+        {
+            <div class="alert alert-danger mt-3">@serverError</div>
+        }
+    </EditForm>
 </div>
 
 @code {
-    private string email = "";
-    private string password = "";
-    private string confirmPassword = "";
+    private RegisterModel model = new();
+
+    private string? serverError;
+
+    public class RegisterModel
+    {
+        [Required(ErrorMessage = "Email là bắt buộc")]
+        [EmailAddress(ErrorMessage = "Email không hợp lệ")]
+        public string? Email { get; set; }
+
+        [Required(ErrorMessage = "Mật khẩu là bắt buộc")]
+        [MinLength(6, ErrorMessage = "Mật khẩu ít nhất 6 ký tự")]
+        public string? Password { get; set; }
+
+        [Required(ErrorMessage = "Xác nhận mật khẩu là bắt buộc")]
+        [Compare("Password", ErrorMessage = "Mật khẩu xác nhận không khớp")]
+        public string? ConfirmPassword { get; set; }
+    }
 
     private async Task HandleRegister()
     {
-        if (password != confirmPassword)
+        serverError = null;
+
+        if (model.Password != model.ConfirmPassword)
         {
-            Console.WriteLine("Mật khẩu xác nhận không khớp.");
+            serverError = "Mật khẩu và xác nhận mật khẩu không khớp.";
             return;
         }
 
         try
         {
             var client = HttpClientFactory.CreateClient("ServerAPI");
-            var payload = new { Email = email, Password = password };
 
-            // POST JSON (yêu cầu using System.Net.Http.Json)
+            var payload = new
+            {
+                Email = model.Email,
+                Password = model.Password,
+                ConfirmPassword = model.ConfirmPassword
+            };
+
             var response = await client.PostAsJsonAsync("api/auth/register", payload);
+
+            var text = await response.Content.ReadAsStringAsync();
+            Console.WriteLine($"[Register] Response ({response.StatusCode}): {text}");
 
             if (response.IsSuccessStatusCode)
             {
-                Console.WriteLine("Đăng ký thành công. Vui lòng đăng nhập.");
-                Navigation.NavigateTo("/login", forceLoad: true);
+                ToastSvc.ShowToast("Đăng ký thành công. Vui lòng đăng nhập.", ToastLevel.Success);
+                Navigation.NavigateTo("/login");
+                return;
             }
-            else
+
+            try
             {
-                var content = await response.Content.ReadAsStringAsync();
-                Console.WriteLine("Đăng ký thất bại: " + content);
+                var maybe = await response.Content.ReadFromJsonAsync<Dictionary<string, string[]>>();
+                if (maybe != null && maybe.Any())
+                {
+                    serverError = string.Join(" | ", maybe.SelectMany(kv => kv.Value).Distinct());
+                }
+                else
+                {
+                    var o = System.Text.Json.JsonDocument.Parse(text);
+                    if (o.RootElement.TryGetProperty("message", out var m)) serverError = m.GetString();
+                    else if (o.RootElement.TryGetProperty("errors", out var errs))
+                    {
+                        var list = new List<string>();
+                        foreach (var prop in errs.EnumerateObject())
+                        {
+                            foreach (var child in prop.Value.EnumerateArray())
+                                list.Add(child.GetString() ?? prop.Name);
+                        }
+                        serverError = string.Join(" | ", list);
+                    }
+                    else
+                    {
+                        serverError = string.IsNullOrWhiteSpace(text) ? $"Lỗi {response.StatusCode}" : text;
+                    }
+                }
             }
+            catch
+            {
+                serverError = string.IsNullOrWhiteSpace(text) ? $"Lỗi {response.StatusCode}" : text;
+            }
+
+            ToastSvc.ShowToast($"Đăng ký thất bại: {serverError}", ToastLevel.Error);
         }
         catch (Exception ex)
         {
-            Console.WriteLine("Lỗi: " + ex.Message);
+            serverError = ex.Message;
+            Console.WriteLine("Lỗi đăng ký: " + ex);
+            ToastSvc.ShowToast("Lỗi khi gửi yêu cầu đăng ký. Kiểm tra server logs.", ToastLevel.Error);
         }
+    }
+
+    private void BackToLogin()
+    {
+        Navigation.NavigateTo("/login");
     }
 }
