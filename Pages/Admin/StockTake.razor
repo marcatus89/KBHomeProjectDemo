@@ -49,7 +49,23 @@
                         @foreach (var p in productsPage)
                         {
                             <tr>
-                                <td>@p.Name</td>
+                                <td>
+                                    @p.Name
+                                    @* --- Hiển thị badge nếu có yêu cầu Pending cho sản phẩm này --- *@
+                                    @if (p.HasPendingAdjustment)
+                                    {
+                                    string cls = GetPendingBadgeClass(p.PendingDelta);
+                                    string dtext = GetPendingDeltaText(p.PendingDelta);
+                                    string title = string.IsNullOrEmpty(dtext)
+                                    ? "Có yêu cầu điều chỉnh đang chờ phê duyệt"
+                                    : $"Có yêu cầu điều chỉnh: {dtext}";
+
+                                    <span class="badge @cls ms-2" title="@title">
+                                    <i class="bi bi-clock-fill"></i>
+                                    <span class="ms-1">Chờ @(string.IsNullOrEmpty(dtext) ? "" : $"({dtext})")</span>
+                                    </span>
+                                    }
+                                </td>
                                 <td class="text-center">@p.StockQuantity</td>
                                 <td>
                                     <InputNumber TValue="int" @bind-Value="p.PhysicalCount" class="form-control" />
@@ -57,7 +73,7 @@
                                 <td>
                                     <button class="btn btn-sm btn-primary me-2"
                                             @onclick="() => RequestAdjustment(p)"
-                                            disabled="@(p.PhysicalCount < 0 || p.PhysicalCount == p.StockQuantity)">
+                                            disabled="@(p.PhysicalCount < 0 || p.PhysicalCount == p.StockQuantity || p.HasPendingAdjustment)">
                                         <i class="bi bi-send"></i> Yêu cầu điều chỉnh
                                     </button>
 
@@ -188,6 +204,12 @@
         public string? Name { get; set; }
         public int StockQuantity { get; set; }
         public int PhysicalCount { get; set; }
+
+        // --- cờ hiển thị nếu có request Pending ---
+        public bool HasPendingAdjustment { get; set; } = false;
+
+        // --- mới: delta = RequestedQuantity - OldQuantity (có dấu) ---
+        public int? PendingDelta { get; set; }
     }
 
     // Admin: requests
@@ -236,6 +258,39 @@
             StockQuantity = p.StockQuantity,
             PhysicalCount = p.StockQuantity
         }).ToList();
+
+        // --- mới: xác định các productId có yêu cầu Pending và lấy delta từ request mới nhất ---
+        var ids = allProducts.Select(a => a.Id).ToList();
+        if (ids.Any())
+        {
+            // lấy request Pending mới nhất cho mỗi product
+            var pendingLatest = await db.InventoryAdjustmentRequests
+                                        .Where(r => r.Status == "Pending" && ids.Contains(r.ProductId))
+                                        .GroupBy(r => r.ProductId)
+                                        .Select(g => g.OrderByDescending(x => x.RequestedAt).FirstOrDefault())
+                                        .ToListAsync();
+
+            var pendingMap = pendingLatest
+                             .Where(x => x != null)
+                             .ToDictionary(
+                                x => x!.ProductId,
+                                x => (Delta: (int?)(x!.RequestedQuantity - x!.OldQuantity), // có dấu
+                                      ReqId: x!.Id));
+
+            foreach (var pvm in allProducts)
+            {
+                if (pendingMap.ContainsKey(pvm.Id))
+                {
+                    pvm.HasPendingAdjustment = true;
+                    pvm.PendingDelta = pendingMap[pvm.Id].Delta;
+                }
+                else
+                {
+                    pvm.HasPendingAdjustment = false;
+                    pvm.PendingDelta = null;
+                }
+            }
+        }
 
         totalPages = (int)Math.Ceiling((double)allProducts.Count / pageSize);
         totalPages = Math.Max(1, totalPages);
@@ -301,6 +356,18 @@
         await using var db = await DbFactory.CreateDbContextAsync();
         try
         {
+            // --- kiểm tra đã có request Pending chưa ---
+            var alreadyPending = await db.InventoryAdjustmentRequests.AnyAsync(r => r.ProductId == pvm.Id && r.Status == "Pending");
+            if (alreadyPending)
+            {
+                ToastSvc.ShowToast("Đã có yêu cầu điều chỉnh đang chờ phê duyệt cho sản phẩm này.", ToastLevel.Info);
+                // đảm bảo UI phản ánh trạng thái
+                pvm.HasPendingAdjustment = true;
+                // load products to get latest delta
+                await LoadProducts();
+                return;
+            }
+
             var request = new InventoryAdjustmentRequest
             {
                 ProductId = pvm.Id,
@@ -318,7 +385,10 @@
 
             ToastSvc.ShowToast("✅ Đã gửi yêu cầu điều chỉnh. Vui lòng chờ Admin phê duyệt.", ToastLevel.Success);
 
-            // Reload requests for admin and keep product list fresh
+            // Cập nhật UI: reload products để đồng bộ (badge + delta)
+            await LoadProducts();
+
+            // Reload requests cho admin nếu cần
             if (isAdmin) await LoadRequests();
         }
         catch (Exception ex)
@@ -471,7 +541,9 @@
 
             ToastSvc.ShowToast($"Đã từ chối yêu cầu #{req.Id}.", ToastLevel.Info);
 
+            // reload both requests and products => badge sẽ biến mất khi không còn Pending
             await LoadRequests();
+            await LoadProducts();
         }
         catch (Exception ex)
         {
@@ -480,4 +552,23 @@
         }
     }
     #endregion
+
+    // Helper: trả về class CSS cho badge tùy delta
+    // delta > 0 => tăng => xanh (bg-success)
+    // delta < 0 => giảm => đỏ (bg-danger)
+    // null => trung tính => info
+    private string GetPendingBadgeClass(int? delta)
+    {
+        if (!delta.HasValue) return "bg-info text-dark";
+        if (delta.Value > 0) return "bg-success text-white";
+        if (delta.Value < 0) return "bg-danger text-white";
+        return "bg-info text-dark";
+    }
+
+    // Helper: format delta thành "+2" hoặc "-1" hoặc "" nếu null
+    private string GetPendingDeltaText(int? delta)
+    {
+        if (!delta.HasValue) return string.Empty;
+        return delta.Value > 0 ? $"+{delta.Value}" : delta.Value.ToString();
+    }
 }

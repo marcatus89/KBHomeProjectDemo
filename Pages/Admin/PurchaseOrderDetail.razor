@@ -2,6 +2,7 @@
 @attribute [Authorize(Roles = "Admin, Purchasing, Warehouse")]
 @using Microsoft.EntityFrameworkCore
 @using System.Security.Claims
+@using System.Linq
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject NavigationManager Navigation
 @inject IJSRuntime JSRuntime
@@ -85,23 +86,40 @@ else
                 <strong>Số phiếu:</strong> @purchaseOrder.PurchaseOrderNumber |
                 <strong>Nhà cung cấp:</strong> @purchaseOrder.Supplier?.Name |
                 <strong>Trạng thái:</strong>
-                <!-- Sửa: nếu trạng thái bắt đầu bằng "Đã nhận hàng" (bao gồm "Đã nhận hàng (có chênh lệch)") => bg-success -->
-                <span class="badge @(purchaseOrder.Status != null && purchaseOrder.Status.StartsWith("Đã nhận hàng") ? "bg-success" : purchaseOrder.Status == "Chờ phê duyệt" ? "bg-info text-dark" : "bg-warning text-dark")">@purchaseOrder.Status</span>
+                @{
+                    var actualStatus = purchaseOrder.Status ?? string.Empty;
+                    var displayStatus = GetDisplayStatus(actualStatus);
+                    var badgeClass = GetBadgeClass(actualStatus, displayStatus);
+                }
+                <span class="badge @badgeClass" title="@(GetBadgeTitle(actualStatus))">@displayStatus</span>
             </div>
             <div>
                 <button class="btn btn-outline-secondary me-2" @onclick="Print"><span class="oi oi-print"></span> In Phiếu</button>
-                <br>
+                <br />
                 @if (canReceive)
                 {
                     <button class="btn btn-success me-2" @onclick="HandleReceiveItems" disabled="@isProcessing">Xác nhận</button>
                 }
 
-                @if (isAdmin && purchaseOrder.Status == "Chờ phê duyệt")
+                @if (isAdmin && actualStatus == "Chờ phê duyệt")
                 {
-                    <button class="btn btn-primary" @onclick="AdminApprove" disabled="@isProcessing">Phê duyệt và Nhập</button>
+                    <button class="btn btn-primary me-1" @onclick="AdminApprove" disabled="@isProcessing">Phê duyệt và Nhập</button>
+                    <button class="btn btn-danger" @onclick="AdminReject" disabled="@isProcessing">Từ chối</button>
                 }
             </div>
         </div>
+
+        @* Hiển thị thông tin từ chối (chỉ cho Admin) *@
+        @if (!string.IsNullOrWhiteSpace(purchaseOrder.RejectionReason) && isAdmin)
+        {
+            <div class="alert alert-danger mt-2 mx-3">
+                <strong>Đã bị từ chối bởi:</strong> @purchaseOrder.RejectedByEmail
+                <br />
+                <strong>Ngày:</strong> @purchaseOrder.RejectedAt?.ToLocalTime().ToString("g")
+                <br />
+                <strong>Lý do:</strong> @purchaseOrder.RejectionReason
+            </div>
+        }
 
         <div class="card-body">
             <h5 class="card-title">Danh sách sản phẩm</h5>
@@ -146,17 +164,38 @@ else
     private bool isProcessing = false;
     private bool canReceive = false;
     private bool isAdmin = false;
+    private bool isWarehouse = false;
+    private string? currentUsername;
 
     protected override async Task OnInitializedAsync()
     {
         isLoading = true;
         try
         {
-            // thông tin user & role
             var auth = await AuthStateProvider.GetAuthenticationStateAsync();
             var user = auth.User;
             isAdmin = user?.IsInRole("Admin") ?? false;
+            isWarehouse = user?.IsInRole("Warehouse") ?? false;
+            currentUsername = user?.Identity?.Name ?? "unknown";
 
+            await LoadPurchaseOrder();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[PurchaseOrderDetail] Init error: " + ex);
+            ToastSvc.ShowToast("Lỗi khi khởi tạo trang.", ToastLevel.Error);
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task LoadPurchaseOrder()
+    {
+        isLoading = true;
+        try
+        {
             await using var db = await DbFactory.CreateDbContextAsync();
             purchaseOrder = await db.PurchaseOrders
                                     .Include(po => po.Supplier)
@@ -166,14 +205,36 @@ else
 
             if (purchaseOrder != null)
             {
-                // Nếu dữ liệu cũ (ReceivedQuantity <= 0), gán mặc định bằng Quantity
+                // default ReceivedQuantity
                 foreach (var it in purchaseOrder.Items)
                 {
                     if (it.ReceivedQuantity <= 0)
                         it.ReceivedQuantity = it.Quantity;
                 }
 
-                canReceive = purchaseOrder.Status == "Đã đặt hàng";
+                // canReceive logic: Warehouse vẫn được xác nhận nếu có RejectionReason (hiển thị "Đã đặt hàng")
+                canReceive = purchaseOrder.Status == "Đã đặt hàng"
+                             || (isWarehouse && !string.IsNullOrWhiteSpace(purchaseOrder.RejectionReason));
+
+                // Warehouse toast 1 lần nếu có RejectionReason
+                if (isWarehouse && !string.IsNullOrWhiteSpace(purchaseOrder.RejectionReason))
+                {
+                    var key = $"po_rejection_seen_{purchaseOrder.Id}_{currentUsername}";
+                    try
+                    {
+                        var seen = await JSRuntime.InvokeAsync<string>("localStorage.getItem", key);
+                        if (string.IsNullOrEmpty(seen))
+                        {
+                            var msg = $"Phiếu {purchaseOrder.PurchaseOrderNumber} đã bị Admin từ chối. Lý do: {purchaseOrder.RejectionReason}";
+                            ToastSvc.ShowToast(msg, ToastLevel.Warning);
+                            await JSRuntime.InvokeVoidAsync("localStorage.setItem", key, "1");
+                        }
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                }
             }
         }
         catch (Exception ex)
@@ -184,6 +245,7 @@ else
         finally
         {
             isLoading = false;
+            StateHasChanged();
         }
     }
 
@@ -195,13 +257,11 @@ else
             item.ReceivedQuantity = 0;
             return;
         }
-
         if (!int.TryParse(e.Value.ToString(), out int val))
         {
             item.ReceivedQuantity = 0;
             return;
         }
-
         if (val < 0)
         {
             ToastSvc.ShowToast("Số lượng không thể là số âm. Đã đặt về 0.", ToastLevel.Warning);
@@ -223,11 +283,9 @@ else
             return;
         }
 
-        // Kiểm tra chênh lệch
         var mismatchItems = purchaseOrder.Items.Where(i => i.ReceivedQuantity != i.Quantity).ToList();
         if (mismatchItems.Any() && !isAdmin)
         {
-            // nếu không phải admin, gửi yêu cầu phê duyệt
             var ok = await JSRuntime.InvokeAsync<bool>("confirm", $"Có {mismatchItems.Count} sản phẩm có chênh lệch giữa số lượng đặt và số lượng nhận. Bạn muốn gửi yêu cầu phê duyệt đến Admin?");
             if (!ok) return;
 
@@ -235,15 +293,12 @@ else
             return;
         }
 
-        // Nếu không chênh lệch hoặc là admin -> thực hiện nhận luôn
         await ReceiveAndUpdateStock(purchaseOrder.Items, purchaseOrder.PurchaseOrderNumber);
     }
 
-    // Lưu ReceivedQuantity và đặt trạng thái "Chờ phê duyệt"
     private async Task RequestApproval()
     {
         if (purchaseOrder == null) return;
-
         isProcessing = true;
         try
         {
@@ -257,7 +312,6 @@ else
                 return;
             }
 
-            // Lưu ReceivedQuantity từ UI xuống DB (đảm bảo không âm)
             foreach (var it in poDb.Items)
             {
                 var uiItem = purchaseOrder.Items.FirstOrDefault(x => x.Id == it.Id);
@@ -273,6 +327,9 @@ else
             await db.SaveChangesAsync();
 
             purchaseOrder.Status = poDb.Status;
+            canReceive = purchaseOrder.Status == "Đã đặt hàng"
+                         || (isWarehouse && !string.IsNullOrEmpty(purchaseOrder.RejectionReason));
+
             ToastSvc.ShowToast("Đã gửi yêu cầu phê duyệt đến Admin.", ToastLevel.Info);
         }
         catch (Exception ex)
@@ -287,7 +344,6 @@ else
         }
     }
 
-    // Thực hiện cập nhật tồn kho theo ReceivedQuantity và ghi InventoryLog
     private async Task ReceiveAndUpdateStock(ICollection<PurchaseOrderItem> items, string purchaseOrderNumber)
     {
         isProcessing = true;
@@ -319,7 +375,6 @@ else
                     return;
                 }
 
-                // cập nhật ReceivedQuantity từ UI xuống DB item
                 foreach (var uiItem in items)
                 {
                     var dbItem = po.Items.FirstOrDefault(i => i.Id == uiItem.Id);
@@ -335,10 +390,8 @@ else
                     }
                 }
 
-                // kiểm tra có chênh lệch hay không (sau khi đã gán ReceivedQuantity vào db)
                 bool hasMismatch = po.Items.Any(i => i.ReceivedQuantity != i.Quantity);
 
-                // cập nhật tồn kho theo ReceivedQuantity
                 foreach (var item in po.Items)
                 {
                     var product = await db.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId);
@@ -365,15 +418,22 @@ else
                     await db.InventoryLogs.AddAsync(log);
                 }
 
-                // đặt trạng thái tuỳ theo có chênh lệch hay không
+                // Clear any rejection metadata when actually receiving / approving
+                po.RejectionReason = null;
+                po.RejectedByEmail = null;
+                po.RejectedAt = null;
+
                 po.Status = hasMismatch ? "Đã nhận hàng (có chênh lệch)" : "Đã nhận hàng";
                 db.PurchaseOrders.Update(po);
 
                 await db.SaveChangesAsync();
                 await tx.CommitAsync();
 
-                // cập nhật UI: dùng trạng thái thực tế từ DB
                 purchaseOrder.Status = po.Status;
+                purchaseOrder.RejectionReason = null;
+                purchaseOrder.RejectedByEmail = null;
+                purchaseOrder.RejectedAt = null;
+
                 foreach (var pitem in purchaseOrder.Items)
                 {
                     var prodInDb = await db.Products.AsNoTracking().FirstOrDefaultAsync(p => p.Id == pitem.ProductId);
@@ -401,7 +461,6 @@ else
         }
     }
 
-    // Admin phê duyệt
     private async Task AdminApprove()
     {
         if (!isAdmin)
@@ -418,8 +477,167 @@ else
         await ReceiveAndUpdateStock(purchaseOrder.Items, purchaseOrder.PurchaseOrderNumber);
     }
 
+    private async Task AdminReject()
+    {
+        if (!isAdmin)
+        {
+            ToastSvc.ShowToast("Bạn không có quyền từ chối.", ToastLevel.Warning);
+            return;
+        }
+
+        if (purchaseOrder == null) return;
+
+        string? reason = null;
+        try
+        {
+            reason = await JSRuntime.InvokeAsync<string>("prompt", "Nhập lý do từ chối việc phê duyệt (bắt buộc):");
+        }
+        catch { reason = null; }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            ToastSvc.ShowToast("Vui lòng nhập lý do từ chối.", ToastLevel.Warning);
+            return;
+        }
+
+        var ok = await JSRuntime.InvokeAsync<bool>("confirm", $"Xác nhận từ chối phiếu {purchaseOrder.PurchaseOrderNumber} với lý do: {reason} ?");
+        if (!ok) return;
+
+        isProcessing = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await using var tx = await db.Database.BeginTransactionAsync();
+            try
+            {
+                var po = await db.PurchaseOrders
+                                 .Include(p => p.Items)
+                                 .FirstOrDefaultAsync(p => p.Id == purchaseOrder.Id);
+
+                if (po == null)
+                {
+                    ToastSvc.ShowToast("Không tìm thấy phiếu trên cơ sở dữ liệu.", ToastLevel.Error);
+                    await tx.RollbackAsync();
+                    return;
+                }
+
+                var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+                var user = auth.User;
+                var reviewerEmail = user?.Identity?.Name ?? "Hệ thống";
+
+                // store rejection metadata
+                po.RejectionReason = reason;
+                po.RejectedByEmail = reviewerEmail;
+                po.RejectedAt = DateTime.UtcNow;
+
+                // keep visible to warehouse as "Đã đặt hàng"
+                po.Status = "Đã đặt hàng";
+
+                db.PurchaseOrders.Update(po);
+
+                // optional: write InventoryLog events (QuantityChange=0) so InventoryHistory sees event
+                foreach (var item in po.Items)
+                {
+                    var product = await db.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId);
+                    int oldQty = product?.StockQuantity ?? 0;
+
+                    var log = new InventoryLog
+                    {
+                        ProductId = item.ProductId,
+                        OldQuantity = oldQty,
+                        QuantityChange = 0,
+                        NewQuantity = oldQty,
+                        Reason = $"Phiếu {po.PurchaseOrderNumber} bị Admin từ chối: {reason}",
+                        Timestamp = DateTime.UtcNow
+                    };
+                    await db.InventoryLogs.AddAsync(log);
+                }
+
+                await db.SaveChangesAsync();
+                await tx.CommitAsync();
+
+                // update UI model
+                purchaseOrder.RejectionReason = po.RejectionReason;
+                purchaseOrder.RejectedByEmail = po.RejectedByEmail;
+                purchaseOrder.RejectedAt = po.RejectedAt;
+                purchaseOrder.Status = po.Status;
+
+                ToastSvc.ShowToast($"Đã từ chối phiếu {po.PurchaseOrderNumber}.", ToastLevel.Info);
+            }
+            catch (Exception ex)
+            {
+                try { await tx.RollbackAsync(); } catch { }
+                Console.WriteLine("[PurchaseOrderDetail] AdminReject error: " + ex);
+                ToastSvc.ShowToast("Có lỗi khi từ chối phiếu.", ToastLevel.Error);
+            }
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
     private async Task Print()
     {
         await JSRuntime.InvokeVoidAsync("triggerPrint");
+    }
+
+    private string ExtractRejectionReason(string statusOrReason)
+    {
+        // If we have a separate field, prefer it; otherwise fallback to parsing status
+        if (!string.IsNullOrWhiteSpace(purchaseOrder?.RejectionReason))
+            return purchaseOrder.RejectionReason ?? string.Empty;
+
+        if (string.IsNullOrEmpty(statusOrReason)) return string.Empty;
+        var prefix = "Bị từ chối:";
+        if (statusOrReason.StartsWith(prefix))
+        {
+            return statusOrReason.Substring(prefix.Length).Trim();
+        }
+        return string.Empty;
+    }
+
+    private string GetDisplayStatus(string actualStatus)
+    {
+        // If warehouse & has rejection reason, show "Đã đặt hàng"
+        if (isWarehouse && !string.IsNullOrEmpty(purchaseOrder?.RejectionReason))
+            return "Đã đặt hàng";
+
+        if (isWarehouse && !string.IsNullOrEmpty(actualStatus) && actualStatus.StartsWith("Bị từ chối"))
+            return "Đã đặt hàng";
+
+        return string.IsNullOrEmpty(actualStatus) ? "-" : actualStatus;
+    }
+
+    private string GetBadgeClass(string actualStatus, string displayStatus)
+    {
+        if (!string.IsNullOrEmpty(actualStatus) && actualStatus.StartsWith("Đã nhận hàng"))
+            return "bg-success";
+
+        // Show danger only for admin/non-warehouse when there's a rejection
+        if ((!string.IsNullOrEmpty(purchaseOrder?.RejectionReason) || (!string.IsNullOrEmpty(actualStatus) && actualStatus.StartsWith("Bị từ chối"))) && !isWarehouse)
+            return "bg-danger text-white";
+
+        if (actualStatus == "Chờ phê duyệt")
+            return "bg-info text-dark";
+
+        if (displayStatus == "Đã đặt hàng")
+            return "bg-warning text-dark";
+
+        return "bg-warning text-dark";
+    }
+
+    private string GetBadgeTitle(string actualStatus)
+    {
+        // For admins show rejection details in tooltip too
+        if (isAdmin && !string.IsNullOrEmpty(purchaseOrder?.RejectionReason))
+            return $"Bị từ chối bởi {purchaseOrder.RejectedByEmail} lúc {purchaseOrder.RejectedAt?.ToLocalTime():g}: {purchaseOrder.RejectionReason}";
+
+        // For warehouse show reason as tooltip if exists
+        if (isWarehouse && !string.IsNullOrEmpty(purchaseOrder?.RejectionReason))
+            return $"Lý do: {purchaseOrder.RejectionReason}";
+
+        return string.Empty;
     }
 }

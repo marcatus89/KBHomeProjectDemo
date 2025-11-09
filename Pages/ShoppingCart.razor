@@ -7,6 +7,7 @@
 @inject ToastService ToastSvc
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
 
 @implements IDisposable
 
@@ -225,10 +226,31 @@ else
         ToastSvc.ShowToast("Đã xóa toàn bộ giỏ hàng.", ToastLevel.Success);
     }
 
-    private void ProceedToCheckout()
+    private async Task ProceedToCheckout()
     {
-        // chỉ chuyển sang trang thanh toán, không xóa giỏ hàng
-        Navigation.NavigateTo("/thanh-toan");
+        // Kiểm tra đăng nhập
+        try
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = auth.User;
+
+            if (user == null || !user.Identity?.IsAuthenticated == true)
+            {
+                ToastSvc.ShowToast("Vui lòng đăng nhập để thực hiện đặt hàng.", ToastLevel.Warning);
+
+                var returnUrl = Uri.EscapeDataString(Navigation.Uri);
+                Navigation.NavigateTo($"/login");
+                return;
+            }
+
+            // Nếu đã đăng nhập, chuyển sang trang thanh toán
+            Navigation.NavigateTo("/thanh-toan");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[ShoppingCart] ProceedToCheckout error: " + ex);
+            ToastSvc.ShowToast("Có lỗi xảy ra. Vui lòng thử lại.", ToastLevel.Error);
+        }
     }
 
     public void Dispose()

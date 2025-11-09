@@ -56,12 +56,6 @@ else
             <small class="text-muted">Tối đa 2000 ký tự.</small>
         </div>
 
-        <div class="form-group mb-3">
-            <label for="stock">Số lượng tồn</label>
-            <InputNumber id="stock" class="form-control" @bind-Value="CurrentProduct.StockQuantity" />
-            <ValidationMessage For="@(() => CurrentProduct.StockQuantity)" />
-        </div>
-
         <button type="submit" class="btn btn-primary">Lưu</button>
         <a href="/admin/products" class="btn btn-secondary">Hủy</a>
     </EditForm>
@@ -141,9 +135,7 @@ else
                 productToUpdate.Price = CurrentProduct.Price;
                 productToUpdate.ImageUrl = CurrentProduct.ImageUrl;
                 productToUpdate.CategoryId = CurrentProduct.CategoryId;
-                productToUpdate.StockQuantity = CurrentProduct.StockQuantity;
                 productToUpdate.Description = CurrentProduct.Description; // <-- cập nhật mô tả
-
                 ToastSvc.ShowToast($"✅ Đã cập nhật sản phẩm \"{productToUpdate.Name}\" thành công.", ToastLevel.Success);
             }
         }

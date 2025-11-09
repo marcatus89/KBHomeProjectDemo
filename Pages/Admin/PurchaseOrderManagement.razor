@@ -1,9 +1,11 @@
 @page "/admin/purchase-orders"
 @attribute [Authorize(Roles = "Admin, Purchasing, Warehouse")]
 @using Microsoft.EntityFrameworkCore
+@using System.Security.Claims
 @using DoAnTotNghiep.Models
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
 
 <h3>Quản lý Đơn nhập hàng</h3>
 
@@ -47,13 +49,17 @@ else
         <tbody>
             @foreach (var po in pagedOrders)
             {
+                var actualStatus = po.Status ?? string.Empty;
+                var displayStatus = GetDisplayStatus(actualStatus);
+                var badgeClass = GetBadgeClass(actualStatus, displayStatus);
+
                 <tr>
                     <td><strong>@po.PurchaseOrderNumber</strong></td>
                     <td>@po.Supplier?.Name</td>
                     <td>@po.OrderDate.ToString("dd/MM/yyyy")</td>
                     <td>
-                        <span class="badge @(po.Status == "Đã nhận hàng" ? "bg-success" : "bg-warning text-dark")">
-                            @po.Status
+                        <span class="badge @badgeClass">
+                            @displayStatus
                         </span>
                     </td>
                     <td>
@@ -103,9 +109,15 @@ else
     private int totalPages = 1;
 
     private bool isLoading = true;
+    private bool isWarehouse = false;
 
     protected override async Task OnInitializedAsync()
     {
+        // xác định role người dùng trước
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = auth.User;
+        isWarehouse = user?.IsInRole("Warehouse") == true;
+
         await LoadPurchaseOrders();
     }
 
@@ -123,14 +135,14 @@ else
                 .AsNoTracking()
                 .AsQueryable();
 
-            // tìm kiếm
+            // tìm kiếm (chú ý: tìm theo actual Status trong DB)
             if (!string.IsNullOrWhiteSpace(searchTerm))
             {
                 var s = searchTerm.Trim().ToLower();
                 query = query.Where(po =>
                     po.PurchaseOrderNumber.ToLower().Contains(s) ||
                     (po.Supplier != null && po.Supplier.Name.ToLower().Contains(s)) ||
-                    po.Status.ToLower().Contains(s));
+                    (po.Status != null && po.Status.ToLower().Contains(s)));
             }
 
             // lấy tất cả (để tính phân trang)
@@ -172,5 +184,38 @@ else
         if (page < 1) page = 1;
         currentPage = page;
         await LoadPurchaseOrders();
+    }
+
+    // Nếu actualStatus bắt đầu bằng "Bị từ chối" và người xem là Warehouse => hiển thị "Đã đặt hàng"
+    private string GetDisplayStatus(string actualStatus)
+    {
+        if (isWarehouse && !string.IsNullOrEmpty(actualStatus) && actualStatus.StartsWith("Bị từ chối"))
+            return "Đã đặt hàng";
+
+        if (string.IsNullOrEmpty(actualStatus))
+            return "-";
+
+        return actualStatus;
+    }
+
+    // Chọn class badge: nếu actual status là "Đã nhận hàng..." => xanh; nếu actual là "Bị từ chối" và viewer không phải warehouse => đỏ; nếu actual là "Chờ phê duyệt" => info; else warning
+    private string GetBadgeClass(string actualStatus, string displayStatus)
+    {
+        if (!string.IsNullOrEmpty(actualStatus) && actualStatus.StartsWith("Đã nhận hàng"))
+            return "bg-success";
+
+        if (!string.IsNullOrEmpty(actualStatus) && actualStatus.StartsWith("Bị từ chối") && !isWarehouse)
+            return "bg-danger text-white";
+
+        if (actualStatus == "Chờ phê duyệt")
+            return "bg-info text-dark";
+
+        // If we are showing "Đã đặt hàng" for warehouse because of rejection,
+        // choose the warning color to match normal "Đã đặt hàng"
+        if (displayStatus == "Đã đặt hàng")
+            return "bg-warning text-dark";
+
+        // default
+        return "bg-warning text-dark";
     }
 }
