@@ -14,7 +14,7 @@ namespace DoAnTotNghiep.Models
 
         [Range(1, int.MaxValue, ErrorMessage = "Vui lòng chọn một danh mục.")]
         public int CategoryId { get; set; }
-        
+
         public Category? Category { get; set; }
 
         [MaxLength(2000, ErrorMessage = "Mô tả không được quá 2000 ký tự.")]
@@ -23,6 +23,8 @@ namespace DoAnTotNghiep.Models
         [Range(0, int.MaxValue, ErrorMessage = "Số lượng tồn kho không thể là số âm.")]
         public int StockQuantity { get; set; }
         public bool IsVisible { get; set; } = true;
+        [Timestamp]
+        public byte[]? RowVersion { get; set; }
 
     }
 }

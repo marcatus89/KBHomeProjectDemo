@@ -1,7 +1,7 @@
+// Services/PurchaseOrderService.cs
 using DoAnTotNghiep.Data;
 using DoAnTotNghiep.Models;
 using Microsoft.EntityFrameworkCore;
-using System.Linq;
 using System.Threading.Tasks;
 
 namespace DoAnTotNghiep.Services
@@ -17,16 +17,15 @@ namespace DoAnTotNghiep.Services
 
         public async Task CreatePurchaseOrderAsync(PurchaseOrder purchaseOrder)
         {
-            var lastOrder = await _dbContext.PurchaseOrders
-                                .OrderByDescending(po => po.Id)
-                                .FirstOrDefaultAsync();
-            
-            int nextId = (lastOrder?.Id ?? 0) + 1;
-            purchaseOrder.PurchaseOrderNumber = $"PN-{nextId:D5}";
-
+            // Use DB identity to obtain unique Id safely
+            await using var tx = await _dbContext.Database.BeginTransactionAsync();
             _dbContext.PurchaseOrders.Add(purchaseOrder);
+            await _dbContext.SaveChangesAsync(); // Id assigned by DB
+
+            purchaseOrder.PurchaseOrderNumber = $"PN-{purchaseOrder.Id:D5}";
             await _dbContext.SaveChangesAsync();
+
+            await tx.CommitAsync();
         }
     }
 }
-

@@ -1,3 +1,4 @@
+// Controllers/OrdersController.cs
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -8,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using DoAnTotNghiep.Data;
 using DoAnTotNghiep.Models;
 using DoAnTotNghiep.Services;
+using DoAnTotNghiep.Models.Dto;
 
 namespace DoAnTotNghiep.Controllers
 {
@@ -46,34 +48,37 @@ namespace DoAnTotNghiep.Controllers
         }
 
         /// <summary>
-        /// Tạo đơn từ payload: dùng OrderService để đảm bảo transaction, logs, stock logic.
-        /// Model: Order + Items (CartItem)
+        /// Tạo đơn từ payload
         /// </summary>
-        public class CreateOrderRequest
-        {
-            public Order Order { get; set; } = new();
-            public CartItem[] Items { get; set; } = Array.Empty<CartItem>();
-        }
-
         [HttpPost]
-        public async Task<IActionResult> CreateOrder([FromBody] CreateOrderRequest req)
+        public async Task<IActionResult> CreateOrder([FromBody] CreateOrderDto req)
         {
             if (req == null) return BadRequest("Request null");
-            if (req.Items == null || req.Items.Length == 0) return BadRequest("Cart empty");
+            if (req.Items == null || !req.Items.Any()) return BadRequest("Cart empty");
+            if (!ModelState.IsValid) return BadRequest(ModelState);
 
             // determine user
             string? userId = null;
             if (User?.Identity?.IsAuthenticated == true)
                 userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
-            var total = req.Items.Sum(i => i.Price * i.Quantity);
+            // Map DTO items -> domain CartItem
+            var items = req.Items.Select(i => new CartItem
+            {
+                ProductId = i.ProductId,
+                ProductName = i.ProductName ?? string.Empty,
+                Price = i.Price,
+                Quantity = i.Quantity
+            }).ToArray();
+
+            var total = items.Sum(i => i.Price * i.Quantity);
 
             var result = await _orderService.CreateOrderAsync(
                 userId,
-                string.IsNullOrWhiteSpace(req.Order.CustomerName) ? (User?.Identity?.Name ?? "Khách lẻ") : req.Order.CustomerName,
-                req.Order.PhoneNumber ?? "",
-                req.Order.ShippingAddress ?? "",
-                req.Items,
+                string.IsNullOrWhiteSpace(req.CustomerName) ? (User?.Identity?.Name ?? "Khách lẻ") : req.CustomerName,
+                req.PhoneNumber ?? "",
+                req.ShippingAddress ?? "",
+                items,
                 total
             );
 
@@ -85,7 +90,5 @@ namespace DoAnTotNghiep.Controllers
 
             return CreatedAtAction(nameof(GetOrder), new { id = result.OrderId }, new { success = true, orderId = result.OrderId });
         }
-
-        // (tùy: thêm API để huỷ đơn, list orders, ...)
     }
 }

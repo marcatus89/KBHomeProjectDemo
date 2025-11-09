@@ -1,7 +1,9 @@
+// Services/CartService.cs
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using DoAnTotNghiep.Models;
+using Microsoft.Extensions.Logging;
 
 namespace DoAnTotNghiep.Services
 {
@@ -9,13 +11,20 @@ namespace DoAnTotNghiep.Services
     {
         public event Action? OnChange;
         private readonly List<CartItem> _items = new();
+        private readonly ILogger<CartService> _logger;
 
         public IReadOnlyList<CartItem> Items => _items.AsReadOnly();
         public decimal Total => _items.Sum(i => i.Price * i.Quantity);
 
+        public CartService(ILogger<CartService> logger)
+        {
+            _logger = logger;
+        }
+
         public void AddToCart(Product product, int quantity)
         {
-            Console.WriteLine($"[CartService] InstanceHash={this.GetHashCode()} AddToCart called (productId={product?.Id}, qty={quantity})");
+            _logger.LogDebug("[CartService] InstanceHash={Hash} AddToCart called (productId={ProductId}, qty={Qty})",
+                this.GetHashCode(), product?.Id, quantity);
 
             if (product == null) throw new ArgumentNullException(nameof(product));
             if (quantity <= 0) return;
@@ -24,7 +33,7 @@ namespace DoAnTotNghiep.Services
             if (existing != null)
             {
                 existing.Quantity += quantity;
-                Console.WriteLine($"[CartService] Incremented product {product.Id} -> {existing.Quantity}");
+                _logger.LogDebug("[CartService] Incremented product {Pid} -> {Qty}", product.Id, existing.Quantity);
             }
             else
             {
@@ -36,10 +45,10 @@ namespace DoAnTotNghiep.Services
                     Quantity = quantity
                 };
                 _items.Add(item);
-                Console.WriteLine($"[CartService] Added new item product {product.Id} qty={quantity}");
+                _logger.LogDebug("[CartService] Added new item product {Pid} qty={Qty}", product.Id, quantity);
             }
 
-            Console.WriteLine($"[CartService] totalQty={_items.Sum(i => i.Quantity)}, distinctItems={_items.Count}");
+            _logger.LogDebug("[CartService] totalQty={TotalQty}, distinctItems={Distinct}", _items.Sum(i => i.Quantity), _items.Count);
             NotifyStateChanged();
         }
 
@@ -72,7 +81,7 @@ namespace DoAnTotNghiep.Services
 
         private void NotifyStateChanged()
         {
-            Console.WriteLine($"[CartService] InstanceHash={this.GetHashCode()} NotifyStateChanged()");
+            _logger.LogDebug("[CartService] InstanceHash={Hash} NotifyStateChanged()", this.GetHashCode());
             OnChange?.Invoke();
         }
     }

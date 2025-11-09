@@ -26,8 +26,8 @@ namespace DoAnTotNghiep.Services
         }
 
         /// <summary>
-        /// Tạo đơn (được gọi từ UI/Checkout). Thực hiện kiểm tra tồn trước, tạo order, trừ tồn và ghi InventoryLog (có OldQuantity).
-        /// Tất cả diễn ra trong transaction.
+        /// Tạo đơn: thực hiện kiểm tra tồn và giảm tồn **atomically** bằng câu lệnh UPDATE trên DB.
+        /// Tất cả trong transaction.
         /// </summary>
         public async Task<OrderResult> CreateOrderAsync(string? userId,
                                                         string customerName,
@@ -45,16 +45,17 @@ namespace DoAnTotNghiep.Services
                 return new OrderResult(false, null, "Giỏ hàng trống.");
             }
 
-            // Group by productId so we handle duplicate product lines correctly
+            // Group by productId to compute totals per product
             var qtyByProduct = items
                 .GroupBy(ci => ci.ProductId)
                 .ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
 
             await using var db = await _dbFactory.CreateDbContextAsync();
             await using var tx = await db.Database.BeginTransactionAsync();
+
             try
             {
-                // Load all products involved (single query)
+                // Load product basic info (name, price) to validate existence
                 var productIds = qtyByProduct.Keys.ToArray();
                 var products = await db.Products
                     .Where(p => productIds.Contains(p.Id))
@@ -70,21 +71,7 @@ namespace DoAnTotNghiep.Services
                     return new OrderResult(false, null, $"Không tìm thấy sản phẩm: {miss}");
                 }
 
-                // Check stock availability for every product
-                foreach (var kv in qtyByProduct)
-                {
-                    var pid = kv.Key;
-                    var required = kv.Value;
-                    var p = products[pid];
-                    if (p.StockQuantity < required)
-                    {
-                        _logger.LogWarning("Not enough stock for ProductId={Pid}. Available={Stock}, Required={Req}. Rolling back.", pid, p.StockQuantity, required);
-                        await tx.RollbackAsync();
-                        return new OrderResult(false, null, $"Sản phẩm \"{p.Name}\" chỉ còn {p.StockQuantity} trong kho.");
-                    }
-                }
-
-                // All good — create order (so we have order.Id for logs)
+                // Create order first so we have order.Id for logs
                 var order = new Order
                 {
                     CustomerName = customerName,
@@ -97,7 +84,7 @@ namespace DoAnTotNghiep.Services
                 };
 
                 db.Orders.Add(order);
-                await db.SaveChangesAsync(); // order.Id được gán
+                await db.SaveChangesAsync(); // order.Id assigned
 
                 _logger.LogInformation("Created Order Id={OrderId}", order.Id);
 
@@ -107,7 +94,6 @@ namespace DoAnTotNghiep.Services
                 {
                     try
                     {
-                        // ApplicationDbContext is Identity-aware; try to read IdentityUser
                         var identityUser = await db.Set<IdentityUser>().FindAsync(userId);
                         if (identityUser != null)
                         {
@@ -125,53 +111,72 @@ namespace DoAnTotNghiep.Services
                     }
                     catch
                     {
-                        // fallback
                         placedBy = !string.IsNullOrWhiteSpace(customerName) ? customerName : userId;
                     }
                 }
 
-                // Now create OrderDetails, decrement stock and add InventoryLogs
-                foreach (var ci in items)
-                {
-                    // It's possible multiple lines refer to same product; use the tracked product
-                    var product = products[ci.ProductId];
+                // 1) For each product, attempt atomic decrement via UPDATE ... WHERE StockQuantity >= required
+                // 2) If any affected == 0 => insufficient stock -> rollback
+                // 3) After successful decrements, create OrderDetails (per original cart lines) and one InventoryLog per product
 
-                    // Double check availability (defensive)
-                    if (product.StockQuantity < ci.Quantity)
+                var inventoryLogs = new List<InventoryLog>();
+
+                foreach (var kv in qtyByProduct)
+                {
+                    var pid = kv.Key;
+                    var required = kv.Value;
+                    var productInfo = products[pid];
+
+                    // Atomic update: reduce stock only if enough
+                    var affected = await db.Database.ExecuteSqlInterpolatedAsync($@"
+                        UPDATE Products
+                        SET StockQuantity = StockQuantity - {required}
+                        WHERE Id = {pid} AND StockQuantity >= {required}
+                    ");
+
+                    if (affected == 0)
                     {
-                        // unexpected: should have been caught earlier
-                        _logger.LogWarning("Unexpected stock shortage for ProductId={Pid} during commit. Rolling back.", product.Id);
+                        // Not enough stock
+                        // Fetch current stock to include in message if possible
+                        var currentStock = await db.Products.AsNoTracking().Where(p => p.Id == pid).Select(p => p.StockQuantity).FirstOrDefaultAsync();
+                        _logger.LogWarning("Not enough stock for ProductId={Pid}. Available={Stock}, Required={Req}. Rolling back.", pid, currentStock, required);
                         await tx.RollbackAsync();
-                        return new OrderResult(false, null, $"Sản phẩm \"{product.Name}\" không đủ tồn khi xử lý đơn.");
+                        return new OrderResult(false, null, $"Sản phẩm \"{productInfo.Name}\" chỉ còn {currentStock} trong kho.");
                     }
 
-                    int oldQty = product.StockQuantity;
-                    product.StockQuantity -= ci.Quantity;
-                    db.Products.Update(product);
+                    // Read new stock after update
+                    var newQty = await db.Products.AsNoTracking().Where(p => p.Id == pid).Select(p => p.StockQuantity).FirstAsync();
+                    var oldQty = newQty + required;
 
-                    var orderDetail = new OrderDetail
+                    inventoryLogs.Add(new InventoryLog
+                    {
+                        ProductId = pid,
+                        OldQuantity = oldQty,
+                        QuantityChange = -required,
+                        NewQuantity = newQty,
+                        Reason = $"Bán hàng - Đơn #{order.Id} bởi {placedBy}",
+                        Timestamp = DateTime.UtcNow
+                    });
+
+                    _logger.LogInformation("Product {Pid}: {Old} -> {New} (change {Change})", pid, oldQty, newQty, -required);
+                }
+
+                // Create OrderDetails for each cart line (keeps line-level info)
+                foreach (var ci in items)
+                {
+                    var od = new OrderDetail
                     {
                         OrderId = order.Id,
-                        ProductId = product.Id,
+                        ProductId = ci.ProductId,
                         ProductName = ci.ProductName,
                         Quantity = ci.Quantity,
                         Price = ci.Price
                     };
-                    db.OrderDetails.Add(orderDetail);
-
-                    var log = new InventoryLog
-                    {
-                        ProductId = product.Id,
-                        OldQuantity = oldQty,
-                        QuantityChange = -ci.Quantity,
-                        NewQuantity = product.StockQuantity,
-                        Reason = $"Bán hàng - Đơn #{order.Id} bởi {placedBy}",
-                        Timestamp = DateTime.UtcNow
-                    };
-                    db.InventoryLogs.Add(log);
-
-                    _logger.LogInformation("Product {Pid}: {Old} -> {New} (change {Change})", product.Id, oldQty, product.StockQuantity, -ci.Quantity);
+                    db.OrderDetails.Add(od);
                 }
+
+                // Add inventory logs (one per product)
+                db.InventoryLogs.AddRange(inventoryLogs);
 
                 await db.SaveChangesAsync();
                 await tx.CommitAsync();
@@ -187,9 +192,7 @@ namespace DoAnTotNghiep.Services
             }
         }
 
-        /// <summary>
-        /// Wrapper gọi CreateOrderAsync từ Checkout (giữ interface cũ).
-        /// </summary>
+        // Wrapper gọi CreateOrderAsync từ Checkout (giữ interface cũ).
         public Task<OrderResult> PlaceOrderAsync(Order orderModel,
                                                  ClaimsPrincipal? user,
                                                  IEnumerable<CartItem> cartItems)
