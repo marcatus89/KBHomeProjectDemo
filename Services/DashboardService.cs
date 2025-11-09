@@ -29,10 +29,8 @@ namespace DoAnTotNghiep.Services
             // Lấy tất cả đơn hàng trừ những đơn đã hủy
             var validOrders = _dbContext.Orders.Where(o => o.Status != "Đã hủy");
 
-            // ✅ Sửa tại đây: ép kiểu double để SQLite hiểu được
             var totalRevenueDouble = await validOrders.SumAsync(o => (double)o.TotalAmount);
             stats.TotalRevenue = (decimal)totalRevenueDouble;
-
             stats.TotalOrders = await validOrders.CountAsync();
             stats.PendingOrders = await validOrders.CountAsync(o => o.Status == "Chờ xác nhận");
 
