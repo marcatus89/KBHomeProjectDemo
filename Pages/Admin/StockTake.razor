@@ -1,4 +1,5 @@
 @page "/admin/stock-take"
+@page "/admin/stock-take/page/{PageNumber:int}"
 @attribute [Authorize(Roles = "Admin, Warehouse")]
 
 @using System
@@ -10,6 +11,7 @@
 @inject ToastService ToastSvc
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IJSRuntime JS
+@inject NavigationManager Navigation
 
 <h3>Kiểm kê &amp; Yêu cầu Điều chỉnh Tồn kho</h3>
 
@@ -92,19 +94,20 @@
                 </tbody>
             </table>
 
+            <!-- PHÂN TRANG SẢN PHẨM: giống Product.razor -->
             <nav class="mt-3">
                 <ul class="pagination justify-content-center">
                     <li class="page-item @(currentPage == 1 ? "disabled" : "")">
-                        <button class="page-link" @onclick="() => ChangePage(currentPage - 1)">Trước</button>
+                        <a class="page-link" href="@($"/admin/stock-take/page/{Math.Max(currentPage - 1, 1)}")">Trước</a>
                     </li>
                     @for (int i = 1; i <= totalPages; i++)
                     {
                         <li class="page-item @(currentPage == i ? "active" : "")">
-                            <button class="page-link" @onclick="() => ChangePage(i)">@i</button>
+                            <a class="page-link" href="@($"/admin/stock-take/page/{i}")">@i</a>
                         </li>
                     }
                     <li class="page-item @(currentPage == totalPages ? "disabled" : "")">
-                        <button class="page-link" @onclick="() => ChangePage(currentPage + 1)">Sau</button>
+                        <a class="page-link" href="@($"/admin/stock-take/page/{Math.Min(currentPage + 1, totalPages)}")">Sau</a>
                     </li>
                 </ul>
             </nav>
@@ -117,6 +120,7 @@
         <div class="card-body">
             <h5>Yêu cầu điều chỉnh tồn kho (Admin)</h5>
 
+            <!-- Filter + ClearFilter -->
             <div class="d-flex mb-3 align-items-center">
                 <label class="me-2">Trạng thái:</label>
                 <select class="form-select w-auto me-3" @bind="adminFilterStatus">
@@ -127,8 +131,12 @@
                 </select>
 
                 <label class="me-2">Tìm:</label>
-                <input class="form-control w-50" placeholder="tên sản phẩm hoặc request id" @bind="adminSearch" />
-                <button class="btn btn-primary ms-3" @onclick="ApplyAdminFilter">Lọc</button>
+                <input class="form-control w-50 me-3" placeholder="tên sản phẩm hoặc request id" @bind="adminSearch" />
+
+                <div class="d-flex gap-2">
+                    <button class="btn btn-primary bi bi-search" @onclick="ApplyAdminFilter">Lọc</button>
+                    <button class="btn btn-secondary bi bi-x-circle" @onclick="ClearAdminFilter">Xóa lọc</button>
+                </div>
             </div>
 
             @if (requests == null)
@@ -207,6 +215,10 @@
 </AuthorizeView>
 
 @code {
+    // route page param (giống Product.razor)
+    [Parameter]
+    public int PageNumber { get; set; } = 1;
+
     // --- Warehouse products state
     private List<ProductViewModel>? allProducts;
     private IEnumerable<ProductViewModel> productsPage = Array.Empty<ProductViewModel>();
@@ -244,10 +256,19 @@
         currentUser = auth.User;
         isAdmin = currentUser?.IsInRole("Admin") == true;
         isWarehouse = currentUser?.IsInRole("Warehouse") == true;
+    }
 
-        await LoadProducts();
+    protected override async Task OnParametersSetAsync()
+    {
+        // page from route param (Product.razor style)
+        currentPage = PageNumber > 0 ? PageNumber : 1;
+
+        // load products page according to currentPage
+        await LoadProducts(currentPage);
+
+        // if admin, also load requests for admin (use currentRequestPage)
         if (isAdmin)
-            await LoadRequests();
+            await LoadRequests(currentRequestPage);
     }
 
     // ---------------- Products pagination ----------------
@@ -329,9 +350,24 @@
         StateHasChanged();
     }
 
-    private async Task ChangePage(int page) => await LoadProducts(page);
-    private async Task SearchProducts() => await LoadProducts(1);
-    private async Task ClearSearch() { searchName = null; await LoadProducts(1); }
+    // navigation helper (programmatic navigation; anchor links will trigger OnParametersSetAsync)
+    private async Task ChangePage(int page)
+    {
+        if (page < 1) page = 1;
+        if (page > totalPages) page = totalPages;
+        currentPage = page;
+        Navigation.NavigateTo($"/admin/stock-take/page/{currentPage}");
+        await LoadProducts(currentPage);
+    }
+
+    private async Task SearchProducts() 
+    {
+        // reset route page to 1 for search (keeps URL if you prefer)
+        PageNumber = 1;
+        currentPage = 1;
+        await LoadProducts(1);
+    }
+    private async Task ClearSearch() { searchName = null; PageNumber = 1; currentPage = 1; await LoadProducts(1); }
 
     // -------------- Request adjustment (Warehouse) --------------
     private async Task RequestAdjustment(ProductViewModel pvm)
@@ -439,6 +475,15 @@
 
     private async Task ChangeRequestPage(int page) => await LoadRequests(page);
     private async Task ApplyAdminFilter() => await LoadRequests(1);
+
+    // New: Clear admin filters
+    private async Task ClearAdminFilter()
+    {
+        adminFilterStatus = null;
+        adminSearch = null;
+        currentRequestPage = 1;
+        await LoadRequests(1);
+    }
 
     private async Task ApproveRequest(int requestId)
     {

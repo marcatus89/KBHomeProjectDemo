@@ -1,62 +1,188 @@
 @page "/admin/suppliers/add"
 @page "/admin/suppliers/edit/{SupplierId:int}"
 @attribute [Authorize(Roles = "Admin, Purchasing")]
+
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Forms
+
 @inject ApplicationDbContext DbContext
 @inject NavigationManager Navigation
+@inject ToastService ToastSvc
+@inject IJSRuntime JS
 
-<h3>@Title</h3>
+<h3 class="mb-3">@Title</h3>
 
-<EditForm Model="@currentSupplier" OnValidSubmit="HandleValidSubmit">
-    <DataAnnotationsValidator />
-    <ValidationSummary />
+<div class="card shadow-sm">
+    <div class="card-body">
+        <EditForm EditContext="editContext" OnValidSubmit="HandleValidSubmit">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
 
-    <div class="form-group mb-3">
-        <label>Tên Nhà cung cấp</label>
-        <InputText class="form-control" @bind-Value="currentSupplier.Name" />
-    </div>
-     <div class="form-group mb-3">
-        <label>Người liên hệ</label>
-        <InputText class="form-control" @bind-Value="currentSupplier.ContactPerson" />
-    </div>
-     <div class="form-group mb-3">
-        <label>Email</label>
-        <InputText type="email" class="form-control" @bind-Value="currentSupplier.Email" />
-    </div>
-     <div class="form-group mb-3">
-        <label>Số điện thoại</label>
-        <InputText class="form-control" @bind-Value="currentSupplier.PhoneNumber" />
-    </div>
+            <div class="mb-3">
+                <label class="form-label">Tên Nhà cung cấp <span class="text-danger">*</span></label>
+                <InputText class="form-control" @bind-Value="currentSupplier.Name" @onblur="OnNameBlur" />
+                <ValidationMessage For="@(() => currentSupplier.Name)" />
+                @if (!string.IsNullOrEmpty(duplicateMessage))
+                {
+                    <div class="text-danger small mt-1">@duplicateMessage</div>
+                }
+            </div>
 
-    <button type="submit" class="btn btn-primary">Lưu</button>
-    <a href="/admin/suppliers" class="btn btn-secondary">Hủy</a>
-</EditForm>
+            <div class="mb-3">
+                <label class="form-label">Người liên hệ</label>
+                <InputText class="form-control" @bind-Value="currentSupplier.ContactPerson" />
+                <ValidationMessage For="@(() => currentSupplier.ContactPerson)" />
+            </div>
+
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Email</label>
+                    <InputText type="email" class="form-control" @bind-Value="currentSupplier.Email" />
+                    <ValidationMessage For="@(() => currentSupplier.Email)" />
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Số điện thoại</label>
+                    <InputText class="form-control" @bind-Value="currentSupplier.PhoneNumber" />
+                    <ValidationMessage For="@(() => currentSupplier.PhoneNumber)" />
+                </div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-primary" type="submit" disabled="@(!IsFormEditable)">
+                    @if (isSaving)
+                    {
+                        <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true">Đang lưu</span>
+                        
+                    }
+                    else
+                    {
+                        <i class="bi bi-save2 me-1">Lưu</i> 
+                    }
+                </button>
+
+                <a class="btn btn-secondary" href="/admin/suppliers">Hủy</a>
+            </div>
+        </EditForm>
+    </div>
+</div>
 
 @code {
     [Parameter]
     public int SupplierId { get; set; }
 
     private Supplier currentSupplier = new();
+    private EditContext editContext = default!;
+    private ValidationMessageStore? messageStore;
+    private string duplicateMessage = string.Empty;
+    private bool isDuplicateName = false;
+    private bool isSaving = false;
+
     private string Title => SupplierId == 0 ? "Thêm Nhà cung cấp" : "Sửa Nhà cung cấp";
+
+    // Property used to disable submit when invalid or saving
+    private bool IsFormEditable => !isSaving && editContext != null && editContext.Validate() && !isDuplicateName;
 
     protected override async Task OnParametersSetAsync()
     {
+        // Load supplier if editing
         if (SupplierId != 0)
         {
-            currentSupplier = await DbContext.Suppliers.FindAsync(SupplierId) ?? new();
+            var s = await DbContext.Suppliers.FindAsync(SupplierId);
+            currentSupplier = s ?? new Supplier();
+        }
+        else
+        {
+            currentSupplier = new Supplier();
+        }
+
+        // Initialize EditContext & message store
+        editContext = new EditContext(currentSupplier);
+        messageStore = new ValidationMessageStore(editContext);
+
+        // Clear duplicate error when user changes Name
+        editContext.OnFieldChanged += (sender, args) =>
+        {
+            if (args.FieldIdentifier.FieldName == nameof(Supplier.Name))
+            {
+                // clear duplicate state & messages
+                isDuplicateName = false;
+                duplicateMessage = string.Empty;
+                messageStore?.Clear(args.FieldIdentifier);
+                editContext.NotifyValidationStateChanged();
+            }
+        };
+    }
+
+    private async Task OnNameBlur(FocusEventArgs args)
+    {
+        await CheckDuplicateNameAsync();
+    }
+
+    private async Task CheckDuplicateNameAsync()
+    {
+        // Clear previous
+        isDuplicateName = false;
+        duplicateMessage = string.Empty;
+        messageStore?.Clear(FieldIdentifier.Create(() => currentSupplier.Name));
+        editContext.NotifyValidationStateChanged();
+
+        if (string.IsNullOrWhiteSpace(currentSupplier.Name))
+        {
+            return;
+        }
+
+        var nameTrimmed = currentSupplier.Name.Trim();
+
+        // Use pattern with % for contains; collation determines case sensitivity
+        var exists = await DbContext.Suppliers
+            .AsNoTracking()
+            .AnyAsync(x => x.Id != SupplierId && EF.Functions.Like(x.Name!, $"%{nameTrimmed}%"));
+
+        if (exists)
+        {
+            isDuplicateName = true;
+            duplicateMessage = "Tên Nhà cung cấp này đã tồn tại. Vui lòng chọn tên khác.";
+            messageStore?.Add(FieldIdentifier.Create(() => currentSupplier.Name), duplicateMessage);
+            editContext.NotifyValidationStateChanged();
         }
     }
 
     private async Task HandleValidSubmit()
     {
-        if (SupplierId == 0)
+        if (editContext == null) return;
+
+        // Validate current context
+        if (!editContext.Validate()) return;
+
+        // final duplicate check
+        await CheckDuplicateNameAsync();
+        if (isDuplicateName) return;
+
+        isSaving = true;
+        try
         {
-            DbContext.Suppliers.Add(currentSupplier);
+            if (SupplierId == 0)
+            {
+                DbContext.Suppliers.Add(currentSupplier);
+            }
+            else
+            {
+                DbContext.Suppliers.Update(currentSupplier);
+            }
+
+            await DbContext.SaveChangesAsync();
+
+            ToastSvc?.ShowToast("Lưu Nhà cung cấp thành công.", ToastLevel.Success);
+            Navigation.NavigateTo("/admin/suppliers");
         }
-        else
+        catch (Exception ex)
         {
-            DbContext.Suppliers.Update(currentSupplier);
+            Console.WriteLine("[Suppliers Add/Edit] Save error: " + ex);
+            ToastSvc?.ShowToast("Có lỗi khi lưu Nhà cung cấp. Vui lòng thử lại.", ToastLevel.Error);
         }
-        await DbContext.SaveChangesAsync();
-        Navigation.NavigateTo("/admin/suppliers");
+        finally
+        {
+            isSaving = false;
+        }
     }
 }

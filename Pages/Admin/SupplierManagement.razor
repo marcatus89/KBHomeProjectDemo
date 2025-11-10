@@ -1,51 +1,304 @@
 @page "/admin/suppliers"
+@page "/admin/suppliers/page/{PageNumber:int}"
 @attribute [Authorize(Roles = "Admin, Purchasing")]
 @using Microsoft.EntityFrameworkCore
 @inject ApplicationDbContext DbContext
 @inject NavigationManager Navigation
+@inject ToastService ToastSvc
+@inject IJSRuntime JS
 
 <h3>Quản lý Nhà cung cấp</h3>
 
-<a href="/admin/suppliers/add" class="btn btn-primary mb-3">Thêm Nhà cung cấp</a>
+<div class="d-flex justify-content-between align-items-center mb-3 gap-3 flex-wrap">
+    <a href="/admin/suppliers/add" class="btn btn-primary d-flex align-items-center">
+        <i class="bi bi-plus-lg me-2"></i> Thêm Nhà cung cấp
+    </a>
 
-@if (suppliers == null)
+    <div class="ms-auto w-100" style="max-width:900px;">
+        <div class="card p-2 shadow-sm">
+            <div class="row g-2 align-items-center">
+                <div class="col-md-3">
+                    <input class="form-control" placeholder="Tên Nhà cung cấp" @bind="nameSearch" />
+                </div>
+                <div class="col-md-3">
+                    <input class="form-control" placeholder="Người liên hệ" @bind="contactSearch" />
+                </div>
+                <div class="col-md-3">
+                    <input class="form-control" placeholder="Email" @bind="emailSearch" />
+                </div>
+                <div class="col-md-3">
+                    <input class="form-control" placeholder="Số điện thoại" @bind="phoneSearch" />
+                </div>
+
+                <div class="col-12 col-md-auto mt-2 mt-md-0">
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-outline-primary d-flex align-items-center" @onclick="SearchSuppliers">
+                            <i class="bi bi-filter-circle me-1"></i> Tìm
+                        </button>
+                        <button class="btn btn-outline-secondary d-flex align-items-center" @onclick="ClearSearch">
+                            <i class="bi bi-x-circle me-1"></i> Xóa lọc
+                        </button>
+                    </div>
+                </div>
+
+                <div class="col-12 text-muted small mt-2">
+                    @if (totalPages == 1)
+                    {
+                        <span>Tổng: <strong>@totalItems</strong> nhà cung cấp</span>
+                    }
+                    else
+                    {
+                        <span>Hiển thị trang <strong>@currentPage</strong> / <strong>@totalPages</strong> — Tổng <strong>@totalItems</strong> nhà cung cấp</span>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (pagedSuppliers == null)
 {
     <LoadingSpinner />
 }
+else if (!pagedSuppliers.Any())
+{
+    <div class="alert alert-info mt-4">
+        Không có nhà cung cấp nào phù hợp.
+    </div>
+}
 else
 {
-    <table class="table table-hover">
-        <thead>
-            <tr>
-                <th>Tên Nhà cung cấp</th>
-                <th>Người liên hệ</th>
-                <th>Email</th>
-                <th>Số điện thoại</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var supplier in suppliers)
-            {
+    <div class="table-responsive shadow-sm rounded">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
                 <tr>
-                    <td>@supplier.Name</td>
-                    <td>@supplier.ContactPerson</td>
-                    <td>@supplier.Email</td>
-                    <td>@supplier.PhoneNumber</td>
-                    <td>
-                        <a href="@($"admin/suppliers/edit/{supplier.Id}")" class="btn btn-sm btn-secondary">Sửa</a>
-                    </td>
+                    <th>Tên Nhà cung cấp</th>
+                    <th>Người liên hệ</th>
+                    <th>Email</th>
+                    <th>Số điện thoại</th>
+                    <th class="text-end" style="width:180px;"></th>
                 </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                @foreach (var supplier in pagedSuppliers)
+                {
+                    <tr>
+                        <td class="fw-semibold">@supplier.Name</td>
+                        <td>@supplier.ContactPerson</td>
+                        <td>@supplier.Email</td>
+                        <td>@supplier.PhoneNumber</td>
+                        <td class="text-end">
+                            <a href="@($"/admin/suppliers/edit/{supplier.Id}")" class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center me-2" title="Sửa">
+                                <i class="bi bi-pencil-square me-1"></i> Sửa
+                            </a>
+
+                            <button class="btn btn-sm btn-danger d-inline-flex align-items-center" @onclick="() => ConfirmDeleteSupplier(supplier.Id, supplier.Name)" title="Xóa">
+                                <i class="bi bi-trash me-1"></i> Xóa
+                            </button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (totalPages > 1)
+    {
+        <nav class="mt-3" aria-label="Page navigation">
+            <div class="d-flex align-items-center justify-content-center gap-2 flex-wrap">
+                <a class="btn btn-outline-secondary btn-sm rounded-pill d-flex align-items-center"
+                   href="@($"/admin/suppliers/page/{Math.Max(currentPage - 1, 1)}")"
+                   aria-disabled="@(currentPage == 1 ? "true" : "false")"
+                   title="Trang trước">
+                    <i class="bi bi-chevron-left me-1"></i> Trước
+                </a>
+
+                @{
+                    int maxButtons = 7;
+                    int start = Math.Max(1, currentPage - maxButtons / 2);
+                    int end = Math.Min(totalPages, start + maxButtons - 1);
+                    if (end - start + 1 < maxButtons)
+                    {
+                        start = Math.Max(1, end - maxButtons + 1);
+                    }
+                }
+
+                @if (start > 1)
+                {
+                    <a class="btn btn-outline-secondary btn-sm rounded-pill" href="@($"/admin/suppliers/page/1")">1</a>
+                    @if (start > 2)
+                    {
+                        <span class="text-muted px-2">…</span>
+                    }
+                }
+
+                @for (int i = start; i <= end; i++)
+                {
+                    var pageNum = i;
+                    if (pageNum == currentPage)
+                    {
+                        <a class="btn btn-primary btn-sm rounded-pill" href="@($"/admin/suppliers/page/{pageNum}")" aria-current="page">@pageNum</a>
+                    }
+                    else
+                    {
+                        <a class="btn btn-outline-secondary btn-sm rounded-pill" href="@($"/admin/suppliers/page/{pageNum}")">@pageNum</a>
+                    }
+                }
+
+                @if (end < totalPages)
+                {
+                    if (end < totalPages - 1)
+                    {
+                        <span class="text-muted px-2">…</span>
+                    }
+                    <a class="btn btn-outline-secondary btn-sm rounded-pill" href="@($"/admin/suppliers/page/{totalPages}")">@totalPages</a>
+                }
+
+                <a class="btn btn-outline-secondary btn-sm rounded-pill d-flex align-items-center"
+                   href="@($"/admin/suppliers/page/{Math.Min(currentPage + 1, totalPages)}")"
+                   aria-disabled="@(currentPage == totalPages ? "true" : "false")"
+                   title="Trang sau">
+                    Sau <i class="bi bi-chevron-right ms-1"></i>
+                </a>
+            </div>
+        </nav>
+    }
 }
 
 @code {
     private List<Supplier>? suppliers;
+    private IEnumerable<Supplier> pagedSuppliers = new List<Supplier>();
 
-    protected override async Task OnInitializedAsync()
+    [Parameter] public int PageNumber { get; set; } = 1;
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private int totalPages = 1;
+    private int totalItems = 0;
+
+    private string? nameSearch;
+    private string? contactSearch;
+    private string? emailSearch;
+    private string? phoneSearch;
+
+    private readonly System.Threading.SemaphoreSlim _loadLock = new(1, 1);
+    private bool _disposed = false;
+
+    protected override async Task OnParametersSetAsync()
     {
-        suppliers = await DbContext.Suppliers.OrderBy(s => s.Name).ToListAsync();
+        currentPage = PageNumber > 0 ? PageNumber : 1;
+        await LoadSuppliers();
+    }
+
+    private async Task LoadSuppliers()
+    {
+        if (_disposed) return;
+
+        await _loadLock.WaitAsync();
+        try
+        {
+            IQueryable<Supplier> q = DbContext.Suppliers.AsNoTracking().OrderBy(s => s.Name);
+
+            if (!string.IsNullOrWhiteSpace(nameSearch))
+                q = q.Where(x => EF.Functions.Like(x.Name!, $"%{nameSearch.Trim()}%"));
+            if (!string.IsNullOrWhiteSpace(contactSearch))
+                q = q.Where(x => EF.Functions.Like(x.ContactPerson!, $"%{contactSearch.Trim()}%"));
+            if (!string.IsNullOrWhiteSpace(emailSearch))
+                q = q.Where(x => EF.Functions.Like(x.Email!, $"%{emailSearch.Trim()}%"));
+            if (!string.IsNullOrWhiteSpace(phoneSearch))
+                q = q.Where(x => EF.Functions.Like(x.PhoneNumber!, $"%{phoneSearch.Trim()}%"));
+
+            totalItems = await q.CountAsync();
+            totalPages = Math.Max(1, (int)Math.Ceiling(totalItems / (double)pageSize));
+
+            if (currentPage < 1) currentPage = 1;
+            if (currentPage > totalPages) currentPage = totalPages;
+
+            suppliers = await q.Skip((currentPage - 1) * pageSize).Take(pageSize).ToListAsync();
+            pagedSuppliers = suppliers;
+        }
+        finally
+        {
+            _loadLock.Release();
+        }
+    }
+
+    private async Task SearchSuppliers()
+    {
+        currentPage = 1;
+        PageNumber = 1;
+        await LoadSuppliers();
+    }
+
+    private async Task ClearSearch()
+    {
+        nameSearch = contactSearch = emailSearch = phoneSearch = null;
+        currentPage = 1;
+        PageNumber = 1;
+        await LoadSuppliers();
+    }
+
+    // ✅ Xoá nhà cung cấp và cập nhật UI ngay lập tức
+    private async Task ConfirmDeleteSupplier(int supplierId, string? supplierName)
+    {
+        var supplier = await DbContext.Suppliers.FindAsync(supplierId);
+        if (supplier == null)
+        {
+            ToastSvc.ShowToast("Không tìm thấy Nhà cung cấp.", ToastLevel.Warning);
+            return;
+        }
+
+        var hasOrders = await DbContext.PurchaseOrders.AnyAsync(po => po.SupplierId == supplierId);
+        if (hasOrders)
+        {
+            ToastSvc.ShowToast($"⚠️ Không thể xóa \"{supplierName}\" vì tồn tại Phiếu nhập/Đơn liên quan.", ToastLevel.Warning);
+            return;
+        }
+
+        bool ok = false;
+        try
+        {
+            ok = await JS.InvokeAsync<bool>("confirm", $"Bạn có chắc muốn xóa Nhà cung cấp \"{supplierName}\"?");
+        }
+        catch { ok = false; }
+
+        if (!ok) return;
+
+        await _loadLock.WaitAsync();
+        try
+        {
+            DbContext.Suppliers.Remove(supplier);
+            await DbContext.SaveChangesAsync();
+
+            if (suppliers != null)
+            {
+                suppliers.RemoveAll(s => s.Id == supplierId);
+                pagedSuppliers = suppliers;
+                totalItems--;
+
+                if (!pagedSuppliers.Any() && currentPage > 1)
+                {
+                    currentPage--;
+                    await LoadSuppliers();
+                }
+            }
+
+            ToastSvc.ShowToast($"✅ Đã xóa Nhà cung cấp \"{supplierName}\".", ToastLevel.Success);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[Suppliers] Delete error: " + ex);
+            ToastSvc.ShowToast("Có lỗi khi xóa Nhà cung cấp. Vui lòng thử lại.", ToastLevel.Error);
+        }
+        finally
+        {
+            _loadLock.Release();
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadLock.Dispose();
     }
 }

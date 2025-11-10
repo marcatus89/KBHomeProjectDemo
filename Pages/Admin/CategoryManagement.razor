@@ -1,47 +1,118 @@
 @page "/admin/categories"
+@page "/admin/categories/page/{PageNumber:int}"
 @attribute [Authorize(Roles = "Admin")]
 @using Microsoft.EntityFrameworkCore
-@inject ApplicationDbContext DbContext
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject ToastService ToastSvc
 
 <h3>Quản lý Danh mục</h3>
 
-<a href="/admin/categories/add" class="btn btn-primary mb-3">Thêm danh mục mới</a>
+<div class="mb-3 d-flex align-items-center gap-3">
+    <a href="/admin/categories/add" class="btn btn-primary">Thêm danh mục mới</a>
 
-@if (categoryList == null)
+    <div class="ms-auto" style="min-width:420px;">
+        <div class="input-group">
+            <span class="input-group-text" id="search-addon">
+                <i class="bi bi-search"></i>
+            </span>
+            <input @bind="searchTerm" @bind:event="oninput" type="text" class="form-control"
+                   placeholder="Tìm theo ID hoặc tên danh mục..." aria-label="Search"
+                   aria-describedby="search-addon" />
+
+            <button class="btn btn-outline-primary" @onclick="SearchCategories" title="Tìm kiếm">
+                <i class="bi bi-filter-circle"></i> Tìm
+            </button>
+
+            <button class="btn btn-outline-secondary" @onclick="ClearSearch" title="Xóa lọc">
+                <i class="bi bi-x-circle"></i> Xóa lọc
+            </button>
+        </div>
+
+        <div class="text-muted small mt-1">
+            @if (totalItems > 0)
+            {
+                <span>Tổng: <strong>@totalItems</strong> danh mục</span>
+            }
+            else
+            {
+                <span>Chưa có danh mục.</span>
+            }
+        </div>
+    </div>
+</div>
+
+@if (isLoading)
 {
     <p><em>Đang tải...</em></p>
 }
 else
 {
-    <table class="table table-hover">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Tên Danh mục</th>
-                <th class="text-center">Số sản phẩm</th>
-                <th class="text-end">Hành động</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var category in categoryList)
-            {
-                <tr>
-                    <td>@category.Id</td>
-                    <td>@category.Name</td>
-                    <td class="text-center">@category.ProductCount</td>
-                    <td class="text-end">
-                        <a href="@($"admin/categories/edit/{category.Id}")" class="btn btn-sm btn-secondary">Sửa</a>
-                        <button class="btn btn-sm btn-danger" @onclick="() => DeleteCategory(category.Id)">Xóa</button>
-                    </td>
-                </tr>
-            }
-        </tbody>
-    </table>
+    @if (categoryList == null || !categoryList.Any())
+    {
+        <div class="alert alert-info">Không có danh mục phù hợp.</div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th style="width:80px;">ID</th>
+                        <th>Tên Danh mục</th>
+                        <th class="text-center" style="width:150px;">Số sản phẩm</th>
+                        <th class="text-end" style="width:160px;">Hành động</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var category in categoryList)
+                    {
+                        <tr>
+                            <td>@category.Id</td>
+                            <td>@category.Name</td>
+                            <td class="text-center">@category.ProductCount</td>
+                            <td class="text-end">
+                                <a href="@($"admin/categories/edit/{category.Id}")" class="btn btn-sm btn-secondary me-2">
+                                    <i class="bi bi-pencil-square"></i> Sửa
+                                </a>
+                                <button class="btn btn-sm btn-danger" @onclick="() => DeleteCategory(category.Id)">
+                                    <i class="bi bi-trash"></i> Xóa
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <!-- PHÂN TRANG (kiểu Product.razor) -->
+        @if (totalPages > 1)
+        {
+            <nav class="mt-3" aria-label="Page navigation">
+                <ul class="pagination justify-content-center">
+                    <li class="page-item @(currentPage == 1 ? "disabled" : "")">
+                        <a class="page-link" href="@($"/admin/categories/page/{Math.Max(currentPage - 1, 1)}")">Trước</a>
+                    </li>
+
+                    @for (int i = 1; i <= totalPages; i++)
+                    {
+                        var pageNum = i;
+                        <li class="page-item @(currentPage == pageNum ? "active" : "")">
+                            <a class="page-link" href="@($"/admin/categories/page/{pageNum}")">@pageNum</a>
+                        </li>
+                    }
+
+                    <li class="page-item @(currentPage == totalPages ? "disabled" : "")">
+                        <a class="page-link" href="@($"/admin/categories/page/{Math.Min(currentPage + 1, totalPages)}")">Sau</a>
+                    </li>
+                </ul>
+            </nav>
+        }
+    }
 }
 
 @code {
-    private List<CategoryViewModel>? categoryList;
+    // route page parameter like Product.razor
+    [Parameter] public int PageNumber { get; set; } = 1;
 
     private class CategoryViewModel
     {
@@ -50,24 +121,113 @@ else
         public int ProductCount { get; set; }
     }
 
-    protected override async Task OnInitializedAsync()
+    private List<CategoryViewModel>? categoryList;
+    private bool isLoading = true;
+
+    // Search
+    private string? searchTerm;
+
+    // Pagination
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private int totalPages = 1;
+    private int totalItems = 0;
+
+    protected override async Task OnParametersSetAsync()
     {
-        categoryList = await DbContext.Categories
-            .Select(c => new CategoryViewModel
+        currentPage = PageNumber > 0 ? PageNumber : 1;
+        await LoadCategories(currentPage);
+    }
+
+    private async Task LoadCategories(int? pageOverride = null)
+    {
+        isLoading = true;
+        categoryList = null;
+        StateHasChanged();
+
+        // create a fresh DbContext per operation
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        try
+        {
+            IQueryable<Category> baseQuery = db.Categories.AsNoTracking();
+
+            if (!string.IsNullOrWhiteSpace(searchTerm))
+            {
+                var s = searchTerm.Trim();
+                if (int.TryParse(s, out int idSearch))
+                {
+                    baseQuery = baseQuery.Where(c => c.Id == idSearch || EF.Functions.Like(c.Name!, $"%{s}%"));
+                }
+                else
+                {
+                    baseQuery = baseQuery.Where(c => EF.Functions.Like(c.Name!, $"%{s}%"));
+                }
+            }
+
+            // total items for pagination (single DB call)
+            totalItems = await baseQuery.CountAsync();
+
+            totalPages = Math.Max(1, (int)Math.Ceiling((double)totalItems / pageSize));
+            currentPage = Math.Clamp(pageOverride ?? currentPage, 1, totalPages);
+
+            // fetch page entities (single DB call)
+            var pageEntities = await baseQuery
+                .OrderBy(c => c.Name)
+                .Skip((currentPage - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            var ids = pageEntities.Select(c => c.Id).ToList();
+
+            // fetch product counts for these categories in one query (group by)
+            Dictionary<int, int> counts = new();
+            if (ids.Any())
+            {
+                counts = await db.Products
+                    .Where(p => ids.Contains(p.CategoryId))
+                    .GroupBy(p => p.CategoryId)
+                    .Select(g => new { CategoryId = g.Key, Count = g.Count() })
+                    .ToDictionaryAsync(x => x.CategoryId, x => x.Count);
+            }
+
+            // map to viewmodel
+            categoryList = pageEntities.Select(c => new CategoryViewModel
             {
                 Id = c.Id,
                 Name = c.Name,
-                ProductCount = DbContext.Products.Count(p => p.CategoryId == c.Id)
-            })
-            .OrderBy(c => c.Name)
-            .ToListAsync();
+                ProductCount = counts.TryGetValue(c.Id, out var ct) ? ct : 0
+            }).ToList();
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SearchCategories()
+    {
+        PageNumber = 1;
+        currentPage = 1;
+        await LoadCategories(1);
+    }
+
+    private async Task ClearSearch()
+    {
+        searchTerm = null;
+        PageNumber = 1;
+        currentPage = 1;
+        await LoadCategories(1);
     }
 
     private async Task DeleteCategory(int categoryId)
     {
-        // Lấy danh mục kèm theo số sản phẩm
-        var productCount = await DbContext.Products.CountAsync(p => p.CategoryId == categoryId);
-        var category = await DbContext.Categories.FindAsync(categoryId);
+        // create fresh db context for the delete operation
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var productCount = await db.Products.CountAsync(p => p.CategoryId == categoryId);
+        var category = await db.Categories.FindAsync(categoryId);
 
         if (category == null)
         {
@@ -75,7 +235,6 @@ else
             return;
         }
 
-        // ✅ Cấm xóa nếu có sản phẩm
         if (productCount > 0)
         {
             ToastSvc.ShowToast(
@@ -85,11 +244,20 @@ else
             return;
         }
 
-        // Xóa danh mục
-        DbContext.Categories.Remove(category);
-        await DbContext.SaveChangesAsync();
+        try
+        {
+            db.Categories.Remove(category);
+            await db.SaveChangesAsync();
 
-        categoryList?.Remove(categoryList.First(c => c.Id == categoryId));
-        ToastSvc.ShowToast($"✅ Đã xóa danh mục \"{category.Name}\" thành công.", ToastLevel.Success);
+            // reload current page
+            await LoadCategories(currentPage);
+
+            ToastSvc.ShowToast($"✅ Đã xóa danh mục \"{category.Name}\" thành công.", ToastLevel.Success);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[Categories] DeleteCategory error: " + ex);
+            ToastSvc.ShowToast("Có lỗi khi xóa danh mục. Vui lòng thử lại.", ToastLevel.Error);
+        }
     }
 }

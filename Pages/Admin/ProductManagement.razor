@@ -9,13 +9,22 @@
 
 <h3>Quản lý Sản phẩm</h3>
 
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <a href="/admin/products/add" class="btn btn-primary">Thêm sản phẩm mới</a>
+<div class="d-flex justify-content-between align-items-center mb-3 gap-3 flex-wrap">
+    <a href="/admin/products/add" class="btn btn-primary">
+        <i class="bi bi-plus-lg me-1"></i> Thêm sản phẩm mới
+    </a>
 
-    <div class="d-flex align-items-center gap-2">
-        <input @bind="searchTerm" class="form-control" placeholder="Nhập tên sản phẩm cần tìm..." style="min-width:300px" />
-        <button class="btn btn-primary" @onclick="SearchProducts">Tìm kiếm</button>
-        <button class="btn btn-secondary" @onclick="ClearSearch">Xóa lọc</button>
+    <div class="ms-auto d-flex align-items-center gap-2" style="min-width:320px;">
+        <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input @bind="searchTerm" @bind:event="oninput" class="form-control" placeholder="Nhập tên sản phẩm cần tìm..." aria-label="Tìm sản phẩm" />
+            <button class="btn btn-outline-primary" @onclick="SearchProducts" title="Tìm kiếm">
+                <i class="bi bi-filter-circle"></i> Tìm
+            </button>
+            <button class="btn btn-outline-secondary" @onclick="ClearSearch" title="Xóa lọc">
+                <i class="bi bi-x-circle"></i> Xóa
+            </button>
+        </div>
     </div>
 </div>
 
@@ -25,15 +34,15 @@
 }
 else
 {
-    <div class="table-responsive">
-        <table class="table table-hover">
-            <thead>
+    <div class="table-responsive shadow-sm rounded">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
                 <tr>
                     <th>Tên Sản phẩm</th>
-                    <th>Giá</th>
-                    <th class="text-center">Tồn kho</th>
-                    <th class="text-center">Hiển thị</th>
-                    <th class="text-end">Hành động</th>
+                    <th style="width:140px;">Giá</th>
+                    <th class="text-center" style="width:120px;">Tồn kho</th>
+                    <th class="text-center" style="width:120px;">Hiển thị</th>
+                    <th class="text-end" style="width:240px;">Hành động</th>
                 </tr>
             </thead>
             <tbody>
@@ -42,7 +51,17 @@ else
                     @foreach (var product in pagedProducts)
                     {
                         <tr>
-                            <td>@product.Name</td>
+                            <td>
+                                <div class="d-flex align-items-center gap-3">
+                                    <img src="@(!string.IsNullOrWhiteSpace(product.ImageUrl) ? product.ImageUrl : "/images/no-image.png")"
+                                         alt="@product.Name"
+                                         class="rounded"
+                                         style="width:60px;height:48px;object-fit:cover;border:1px solid #e9ecef;" />
+                                    <div>
+                                        <div class="fw-semibold">@product.Name</div>
+                                    </div>
+                                </div>
+                            </td>
                             <td>@product.Price.ToString("n0") VNĐ</td>
                             <td class="text-center">
                                 @if (product.StockQuantity == 0)
@@ -69,12 +88,23 @@ else
                                 }
                             </td>
                             <td class="text-end">
-                                <a href="@($"admin/products/edit/{product.Id}")" class="btn btn-sm btn-secondary me-1">Sửa</a>
-                                <a href="@($"admin/inventory-history/{product.Id}")" class="btn btn-sm btn-info me-1">Lịch sử</a>
-                                <button class="btn btn-sm btn-warning me-1" @onclick="() => ToggleVisibility(product.Id)">
-                                    @(product.IsVisible ? "Ẩn" : "Hiện")
-                                </button>
-                                <button class="btn btn-sm btn-danger" @onclick="() => ConfirmDelete(product.Id, product.Name)">Xóa</button>
+                                <div class="d-flex justify-content-end gap-2">
+                                    <a class="btn btn-sm btn-outline-secondary" href="@($"admin/products/edit/{product.Id}")" title="Sửa">
+                                        <i class="bi bi-pencil-square">Sửa</i>
+                                    </a>
+
+                                    <a class="btn btn-sm btn-outline-info" href="@($"admin/inventory-history/{product.Id}")" title="Lịch sử tồn kho">
+                                        <i class="bi bi-clock-history">Lịch sử</i>
+                                    </a>
+
+                                    <button class="btn btn-sm btn-outline-warning" @onclick="() => ToggleVisibility(product.Id)" title="Ẩn/Hiện">
+                                        <i class="bi @(product.IsVisible ? "bi-eye-slash" : "bi-eye")">Ẩn/Hiện</i>
+                                    </button>
+
+                                    <button class="btn btn-sm btn-danger" @onclick="() => ConfirmDelete(product.Id, product.Name)" title="Xóa">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
                             </td>
                         </tr>
                     }
@@ -87,55 +117,77 @@ else
         </table>
     </div>
 
-    <!-- PHÂN TRANG -->
+    <!-- PHÂN TRANG (theo kiểu Product.razor nhưng giữ logic) -->
     @if (totalPages > 1)
     {
-        <nav class="mt-3">
-            <ul class="pagination justify-content-center">
-                <li class="page-item @(currentPage == 1 ? "disabled" : "")">
-                    <button class="page-link" @onclick="() => ChangePage(currentPage - 1)" disabled="@(currentPage == 1)">Trước</button>
-                </li>
+        <nav aria-label="Page navigation" class="mt-3">
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <div>
+                    <a class="btn btn-outline-secondary btn-sm rounded-pill d-flex align-items-center"
+                       href="@($"/admin/products/{Math.Max(currentPage - 1, 1)}")"
+                       aria-disabled="@(currentPage == 1 ? "true" : "false")"
+                       title="Trang trước">
+                        <i class="bi bi-chevron-left me-1"></i> Trước
+                    </a>
+                </div>
 
-                @* Show a window of pages to avoid too many buttons *@
-                @{
-                    int maxButtons = 7;
-                    int start = Math.Max(1, currentPage - maxButtons / 2);
-                    int end = Math.Min(totalPages, start + maxButtons - 1);
-                    if (end - start + 1 < maxButtons)
-                    {
-                        start = Math.Max(1, end - maxButtons + 1);
+                <div class="d-flex align-items-center flex-wrap" style="gap:6px;">
+                    @{
+                        int maxButtons = 7;
+                        int start = Math.Max(1, currentPage - maxButtons / 2);
+                        int end = Math.Min(totalPages, start + maxButtons - 1);
+                        if (end - start + 1 < maxButtons)
+                        {
+                            start = Math.Max(1, end - maxButtons + 1);
+                        }
                     }
-                }
 
-                @if (start > 1)
-                {
-                    <li class="page-item"><button class="page-link" @onclick="() => ChangePage(1)">1</button></li>
-                    @if (start > 2)
+                    @if (start > 1)
                     {
-                        <li class="page-item disabled"><span class="page-link">...</span></li>
+                        <a class="btn btn-outline-secondary btn-sm rounded-pill" href="@($"/admin/products/1")">1</a>
+                        @if (start > 2)
+                        {
+                            <span class="text-muted px-2">…</span>
+                        }
                     }
-                }
 
-                @for (int i = start; i <= end; i++)
-                {
-                    <li class="page-item @(i == currentPage ? "active" : "")">
-                        <button class="page-link" @onclick="() => ChangePage(i)">@i</button>
-                    </li>
-                }
-
-                @if (end < totalPages)
-                {
-                    if (end < totalPages - 1)
+                    @for (int i = start; i <= end; i++)
                     {
-                        <li class="page-item disabled"><span class="page-link">...</span></li>
+                        var pageNum = i;
+                        if (pageNum == currentPage)
+                        {
+                            <a class="btn btn-primary btn-sm rounded-pill" href="@($"/admin/products/{pageNum}")" aria-current="page">@pageNum</a>
+                        }
+                        else
+                        {
+                            <a class="btn btn-outline-secondary btn-sm rounded-pill" href="@($"/admin/products/{pageNum}")">@pageNum</a>
+                        }
                     }
-                    <li class="page-item"><button class="page-link" @onclick="() => ChangePage(totalPages)">@totalPages</button></li>
-                }
 
-                <li class="page-item @(currentPage == totalPages ? "disabled" : "")">
-                    <button class="page-link" @onclick="() => ChangePage(currentPage + 1)" disabled="@(currentPage == totalPages)">Sau</button>
-                </li>
-            </ul>
+                    @if (end < totalPages)
+                    {
+                        if (end < totalPages - 1)
+                        {
+                            <span class="text-muted px-2">…</span>
+                        }
+                        <a class="btn btn-outline-secondary btn-sm rounded-pill" href="@($"/admin/products/{totalPages}")">@totalPages</a>
+                    }
+                </div>
+
+                <div class="d-flex align-items-center gap-3">
+                    <a class="btn btn-outline-secondary btn-sm rounded-pill d-flex align-items-center"
+                       href="@($"/admin/products/{Math.Min(currentPage + 1, totalPages)}")"
+                       aria-disabled="@(currentPage == totalPages ? "true" : "false")"
+                       title="Trang sau">
+                        Sau <i class="bi bi-chevron-right ms-1"></i>
+                    </a>
+
+                    <div class="text-muted small">
+                        Trang <strong>@currentPage</strong> / <strong>@totalPages</strong>
+                        &nbsp;&middot;&nbsp; Tổng: <strong>@totalItems</strong> sản phẩm
+                    </div>
+                </div>
+            </div>
         </nav>
     }
 
@@ -220,8 +272,6 @@ else
 
         currentPage = pageNumber;
         // update route so URL reflects page
-        var uri = new Uri(Navigation.Uri);
-        var baseUri = Navigation.BaseUri.TrimEnd('/');
         Navigation.NavigateTo($"/admin/products/{currentPage}");
         await LoadProducts();
     }

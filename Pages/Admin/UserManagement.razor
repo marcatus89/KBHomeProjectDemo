@@ -1,21 +1,32 @@
 @page "/admin/users"
+@page "/admin/users/page/{PageNumber:int}"
 @attribute [Authorize(Roles = "Admin")]
 @using Microsoft.AspNetCore.Identity
 @using Microsoft.EntityFrameworkCore
 @inject UserManager<IdentityUser> UserManager
+@inject NavigationManager Navigation
 
 <h3>Quản lý Người dùng</h3>
 
-<a href="/admin/users/create" class="btn btn-primary mb-3">Tạo người dùng mới</a>
+<div class="d-flex flex-wrap align-items-center justify-content-between mb-3 gap-3">
+    <a href="/admin/users/create" class="btn btn-primary">
+        <i class="bi bi-person-plus me-1"></i> Tạo người dùng mới
+    </a>
 
-<!-- THANH TÌM KIẾM -->
-<div class="row mb-3">
-    <div class="col-md-6">
-        <input @bind="searchTerm" class="form-control" placeholder="Nhập email hoặc tên đăng nhập cần tìm..." />
-    </div>
-    <div class="col-md-6">
-        <button class="btn btn-primary me-2" @onclick="SearchUsers">Tìm kiếm</button>
-        <button class="btn btn-secondary" @onclick="ClearSearch">Xóa lọc</button>
+    <div class="ms-auto d-flex align-items-center gap-2" style="min-width:360px;">
+        <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input @bind="searchTerm" @bind:event="oninput" class="form-control"
+                   placeholder="Nhập email hoặc tên đăng nhập..." aria-label="Tìm người dùng" />
+
+            <button class="btn btn-outline-primary" @onclick="SearchUsers" title="Tìm kiếm">
+                <i class="bi bi-filter-circle"></i> Tìm
+            </button>
+
+            <button class="btn btn-outline-secondary" @onclick="ClearSearch" title="Xóa lọc">
+                <i class="bi bi-x-circle"></i> Xóa
+            </button>
+        </div>
     </div>
 </div>
 
@@ -25,55 +36,114 @@
 }
 else
 {
-    <table class="table table-striped">
-        <thead>
-            <tr>
-                <th>Email / Tên đăng nhập</th>
-                <th>Hành động</th>
-            </tr>
-        </thead>
-        <tbody>
-            @if (pagedUsers.Any())
-            {
-                @foreach (var user in pagedUsers)
+    <div class="table-responsive shadow-sm rounded">
+        <table class="table table-striped align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Email / Tên đăng nhập</th>
+                    <th style="width:160px" class="text-end">Hành động</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (pagedUsers.Any())
                 {
-                    <tr>
-                        <td>@user.Email</td>
-                        <td>
-                            <a href="@($"admin/users/manage-roles/{user.Id}")" class="btn btn-sm btn-info">
-                                Quản lý Quyền
-                            </a>
-                        </td>
-                    </tr>
+                    @foreach (var user in pagedUsers)
+                    {
+                        <tr>
+                            <td>
+                                <div class="d-flex flex-column">
+                                    <div class="fw-semibold">@user.Email</div>
+                                    <div class="text-muted small">@user.UserName</div>
+                                </div>
+                            </td>
+                            <td class="text-end">
+                                <div class="d-flex justify-content-end gap-2">
+                                    <a class="btn btn-sm btn-info" href="@($"admin/users/manage-roles/{user.Id}")" title="Quản lý Quyền">
+                                        <i class="bi bi-shield-lock me-1"></i> Quyền
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                    }
                 }
-            }
-            else
-            {
-                <tr><td colspan="2" class="text-center text-muted">Không có người dùng phù hợp.</td></tr>
-            }
-        </tbody>
-    </table>
+                else
+                {
+                    <tr><td colspan="2" class="text-center text-muted">Không có người dùng phù hợp.</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
 
-    <!-- PHÂN TRANG -->
+    <!-- PHÂN TRANG (giao diện đẹp) -->
     @if (totalPages > 1)
     {
-        <nav>
-            <ul class="pagination justify-content-center">
-                <li class="page-item @(currentPage == 1 ? "disabled" : "")">
-                    <button class="page-link" @onclick="() => ChangePage(currentPage - 1)">Trước</button>
-                </li>
+        <nav class="mt-3" aria-label="Page navigation">
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <div>
+                    <a class="btn btn-outline-secondary btn-sm rounded-pill d-flex align-items-center"
+                       href="@($"/admin/users/page/{Math.Max(currentPage - 1, 1)}")"
+                       aria-disabled="@(currentPage == 1 ? "true" : "false")"
+                       title="Trang trước">
+                        <i class="bi bi-chevron-left me-1"></i> Trước
+                    </a>
+                </div>
 
-                @for (int i = 1; i <= totalPages; i++)
-                {
-                    <li class="page-item @(currentPage == i ? "active" : "")">
-                        <button class="page-link" @onclick="() => ChangePage(i)">@i</button>
-                    </li>
-                }
+                <div class="d-flex align-items-center flex-wrap" style="gap:6px;">
+                    @{
+                        int maxButtons = 7;
+                        int start = Math.Max(1, currentPage - maxButtons / 2);
+                        int end = Math.Min(totalPages, start + maxButtons - 1);
+                        if (end - start + 1 < maxButtons)
+                        {
+                            start = Math.Max(1, end - maxButtons + 1);
+                        }
+                    }
 
-                <li class="page-item @(currentPage == totalPages ? "disabled" : "")">
-                    <button class="page-link" @onclick="() => ChangePage(currentPage + 1)">Sau</button>
-                </li>
-            </ul>
+                    @if (start > 1)
+                    {
+                        <a class="btn btn-outline-secondary btn-sm rounded-pill" href="@($"/admin/users/page/1")">1</a>
+                        @if (start > 2)
+                        {
+                            <span class="text-muted px-2">…</span>
+                        }
+                    }
+
+                    @for (int i = start; i <= end; i++)
+                    {
+                        var pageNum = i;
+                        if (pageNum == currentPage)
+                        {
+                            <a class="btn btn-primary btn-sm rounded-pill" href="@($"/admin/users/page/{pageNum}")" aria-current="page">@pageNum</a>
+                        }
+                        else
+                        {
+                            <a class="btn btn-outline-secondary btn-sm rounded-pill" href="@($"/admin/users/page/{pageNum}")">@pageNum</a>
+                        }
+                    }
+
+                    @if (end < totalPages)
+                    {
+                        if (end < totalPages - 1)
+                        {
+                            <span class="text-muted px-2">…</span>
+                        }
+                        <a class="btn btn-outline-secondary btn-sm rounded-pill" href="@($"/admin/users/page/{totalPages}")">@totalPages</a>
+                    }
+                </div>
+
+                <div class="d-flex align-items-center gap-3">
+                    <a class="btn btn-outline-secondary btn-sm rounded-pill d-flex align-items-center"
+                       href="@($"/admin/users/page/{Math.Min(currentPage + 1, totalPages)}")"
+                       aria-disabled="@(currentPage == totalPages ? "true" : "false")"
+                       title="Trang sau">
+                        Sau <i class="bi bi-chevron-right ms-1"></i>
+                    </a>
+
+                    <div class="text-muted small">
+                        Trang <strong>@currentPage</strong> / <strong>@totalPages</strong>
+                    </div>
+                </div>
+            </div>
         </nav>
     }
 }
@@ -84,47 +154,82 @@ else
 
     private string? searchTerm;
 
-    // Phân trang
+    // Pagination
+    [Parameter]
+    public int PageNumber { get; set; } = 1; // route parameter like Product.razor
     private int currentPage = 1;
     private int pageSize = 10;
     private int totalPages = 1;
+    private int totalUsers = 0;
 
-    protected override async Task OnInitializedAsync()
+    // async lock to prevent concurrent DB operations on same underlying DbContext
+    private readonly System.Threading.SemaphoreSlim _loadLock = new(1, 1);
+    private bool _disposed = false;
+
+    protected override async Task OnParametersSetAsync()
     {
+        // initialize current page from route parameter (PageNumber)
+        currentPage = PageNumber > 0 ? PageNumber : 1;
         await LoadUsers();
     }
 
     private async Task LoadUsers()
     {
-        var query = UserManager.Users.AsQueryable();
+        if (_disposed) return;
 
-        // 🔍 Lọc theo email hoặc username (nếu có searchTerm)
-        if (!string.IsNullOrWhiteSpace(searchTerm))
+        await _loadLock.WaitAsync();
+        try
         {
-            query = query.Where(u =>
-                u.Email.Contains(searchTerm) ||
-                u.UserName.Contains(searchTerm));
+            // Build query safely
+            var query = UserManager.Users.AsQueryable().AsNoTracking();
+
+            // Filter by email or username if searchTerm provided
+            if (!string.IsNullOrWhiteSpace(searchTerm))
+            {
+                var term = searchTerm.Trim();
+                // Use EF.Functions.Like for DB-side search (case-insensitive depends on DB collation)
+                query = query.Where(u =>
+                    EF.Functions.Like(u.Email, $"%{term}%") ||
+                    EF.Functions.Like(u.UserName, $"%{term}%"));
+            }
+
+            // Load full list (UserManager.Users may not support Skip/Take safely in some stores)
+            allUsers = await query
+                .OrderBy(u => u.Email)
+                .ToListAsync();
+
+            // Compute total pages
+            totalUsers = allUsers.Count;
+            totalPages = (int)Math.Ceiling((double)totalUsers / pageSize);
+            if (totalPages == 0) totalPages = 1;
+
+            // Clamp currentPage
+            if (currentPage < 1) currentPage = 1;
+            if (currentPage > totalPages) currentPage = totalPages;
+
+            // Get current page items
+            pagedUsers = allUsers
+                .Skip((currentPage - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
         }
-
-        // 📋 Lấy toàn bộ danh sách (vì UserManager không hỗ trợ skip/take trực tiếp trong EF)
-        allUsers = await query
-            .OrderBy(u => u.Email)
-            .ToListAsync();
-
-        // 📄 Tính tổng trang
-        totalPages = (int)Math.Ceiling((double)allUsers.Count / pageSize);
-        if (totalPages == 0) totalPages = 1;
-
-        // 🧮 Lấy dữ liệu trang hiện tại
-        pagedUsers = allUsers
-            .Skip((currentPage - 1) * pageSize)
-            .Take(pageSize)
-            .ToList();
+        catch (Exception ex)
+        {
+            Console.WriteLine("[UserManagement] LoadUsers error: " + ex);
+            // optionally rethrow or show user-facing message
+            throw;
+        }
+        finally
+        {
+            _loadLock.Release();
+        }
     }
 
     private async Task SearchUsers()
     {
+        // When searching, reset to first page
         currentPage = 1;
+        PageNumber = 1;
         await LoadUsers();
     }
 
@@ -132,12 +237,24 @@ else
     {
         searchTerm = null;
         currentPage = 1;
+        PageNumber = 1;
         await LoadUsers();
     }
 
     private async Task ChangePage(int page)
     {
+        if (page < 1) page = 1;
+        if (page > totalPages) page = totalPages;
+
         currentPage = page;
+        // navigate so URL reflects page (OnParametersSetAsync will also load)
+        Navigation.NavigateTo($"/admin/users/page/{currentPage}");
         await LoadUsers();
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadLock.Dispose();
     }
 }

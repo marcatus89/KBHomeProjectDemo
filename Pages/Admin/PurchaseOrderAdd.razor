@@ -6,18 +6,19 @@
 @inject PurchaseOrderService PurchaseOrderSvc
 @inject ToastService ToastSvc
 
-<h3>Tạo Đơn nhập hàng mới</h3>
+<h3 class="mb-4 fw-bold text-primary">Tạo Đơn nhập hàng mới</h3>
 
 <EditForm Model="@newPurchaseOrder" OnValidSubmit="HandleCreatePurchaseOrder">
     <DataAnnotationsValidator />
     <ValidationSummary />
 
-    <div class="card">
+    <div class="card shadow-sm border-0">
         <div class="card-body">
-            <h5 class="card-title">Thông tin chung</h5>
+            <h5 class="card-title fw-semibold mb-3 text-secondary">Thông tin chung</h5>
+
             <div class="row">
                 <div class="col-md-6 mb-3">
-                    <label>Chọn Nhà cung cấp</label>
+                    <label class="fw-semibold">Chọn Nhà cung cấp</label>
                     <InputSelect @bind-Value="newPurchaseOrder.SupplierId" class="form-select">
                         <option value="0">-- Vui lòng chọn --</option>
                         @if (suppliers != null)
@@ -30,62 +31,90 @@
                     </InputSelect>
                 </div>
                 <div class="col-md-6 mb-3">
-                    <label>Ngày giao hàng dự kiến</label>
+                    <label class="fw-semibold">Ngày giao hàng dự kiến</label>
                     <InputDate @bind-Value="newPurchaseOrder.ExpectedDeliveryDate" class="form-control" />
                 </div>
             </div>
 
-            <hr />
+            <hr class="my-4" />
 
-            <h5 class="card-title">Thêm sản phẩm vào đơn</h5>
-            <div class="row align-items-end">
-                <div class="col-md-5">
-                    <label>Sản phẩm</label>
+            <h5 class="card-title fw-semibold text-secondary mb-3">Thêm sản phẩm vào đơn</h5>
+
+            <!-- Hàng 1: Sản phẩm -->
+            <div class="row mb-3">
+                <div class="col-md-12">
+                    <label class="fw-semibold">Sản phẩm</label>
                     <InputSelect @bind-Value="newItem.ProductId" class="form-select">
                         <option value="0">-- Chọn sản phẩm --</option>
-                         @if (products != null)
+                        @if (products != null)
                         {
                             @foreach (var product in products)
                             {
-                                <option value="@product.Id">@product.Name</option>
+                                <option value="@product.Id" title="@product.Name">@product.Name</option>
                             }
                         }
                     </InputSelect>
                 </div>
-                <div class="col-md-3">
-                    <label>Số lượng</label>
+            </div>
+
+            <!-- Hàng 2: Số lượng, Đơn giá, Nút thêm -->
+            <div class="row align-items-end mb-3">
+                <div class="col-md-4">
+                    <label class="fw-semibold">Số lượng</label>
                     <InputNumber @bind-Value="newItem.Quantity" class="form-control" />
                 </div>
-                <div class="col-md-3">
-                    <label>Đơn giá nhập</label>
+                <div class="col-md-4">
+                    <label class="fw-semibold">Đơn giá nhập</label>
                     <InputNumber @bind-Value="newItem.UnitPrice" class="form-control" />
                 </div>
-                <div class="col-md-1">
-                    <button type="button" class="btn btn-success" @onclick="AddItem">Thêm</button>
+                <div class="col-md-4 d-grid">
+                    <button type="button" class="btn btn-add-item" @onclick="AddItem">
+                        <i class="bi bi-plus-circle"></i> Thêm sản phẩm
+                    </button>
                 </div>
             </div>
 
-            <h5 class="card-title mt-4">Các sản phẩm trong đơn</h5>
-            <table class="table">
+            <h5 class="card-title fw-semibold mt-4 text-secondary">Các sản phẩm trong đơn</h5>
+            <table class="table table-hover table-bordered align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 40%;">Tên sản phẩm</th>
+                        <th style="width: 15%;">Số lượng</th>
+                        <th style="width: 20%;">Đơn giá</th>
+                        <th style="width: 20%;">Thành tiền</th>
+                        <th style="width: 5%;"></th>
+                    </tr>
+                </thead>
                 <tbody>
                     @foreach (var item in newPurchaseOrder.Items)
                     {
+                        var productName = products?.FirstOrDefault(p => p.Id == item.ProductId)?.Name ?? "(Không rõ)";
                         <tr>
-                            <td>@(products?.FirstOrDefault(p => p.Id == item.ProductId)?.Name)</td>
-                            <td>Số lượng: @item.Quantity</td>
-                            <td>Đơn giá: @item.UnitPrice.ToString("n0")</td>
+                            <td class="product-name" title="@productName">@productName</td>
+                            <td>@item.Quantity</td>
+                            <td>@item.UnitPrice.ToString("n0")</td>
+                            <td>@((item.Quantity * item.UnitPrice).ToString("n0"))</td>
+                            <td class="text-center">
+                                <button type="button" class="btn btn-remove-item btn-sm" @onclick="() => RemoveItem(item)">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
                         </tr>
                     }
                 </tbody>
             </table>
         </div>
-        <div class="card-footer">
-            <button type="submit" class="btn btn-primary">Tạo Đơn nhập hàng</button>
-            <a href="/admin/purchase-orders" class="btn btn-secondary">Hủy</a>
+
+        <div class="card-footer text-end bg-light">
+            <button type="submit" class="btn btn-primary btn-lg me-2">
+                <i class="bi bi-check-circle"></i> Tạo Đơn nhập hàng
+            </button>
+            <a href="/admin/purchase-orders" class="btn btn-outline-secondary btn-lg">
+                <i class="bi bi-x-circle"></i> Hủy
+            </a>
         </div>
     </div>
 </EditForm>
-
 
 @code {
     private PurchaseOrder newPurchaseOrder = new();
@@ -101,22 +130,17 @@
 
     private void AddItem()
     {
-        // chỉ thêm nếu đã chọn sản phẩm & số lượng hợp lệ
         if (newItem.ProductId > 0 && newItem.Quantity > 0)
         {
-            // clone item để tránh reuse cùng object
             var itemToAdd = new PurchaseOrderItem
             {
                 ProductId = newItem.ProductId,
                 Quantity = newItem.Quantity,
                 UnitPrice = newItem.UnitPrice,
-                // đảm bảo ReceivedQuantity mặc định bằng Quantity
                 ReceivedQuantity = newItem.Quantity
             };
 
             newPurchaseOrder.Items.Add(itemToAdd);
-
-            // reset form item
             newItem = new PurchaseOrderItem();
         }
         else
@@ -125,23 +149,26 @@
         }
     }
 
+    private void RemoveItem(PurchaseOrderItem item)
+    {
+        newPurchaseOrder.Items.Remove(item);
+        ToastSvc.ShowToast("Đã xóa sản phẩm khỏi danh sách.", ToastLevel.Info);
+    }
+
     private async Task HandleCreatePurchaseOrder()
     {
-        // 1) Kiểm tra đã chọn nhà cung cấp
         if (newPurchaseOrder.SupplierId <= 0)
         {
             ToastSvc.ShowToast("Vui lòng chọn Nhà cung cấp trước khi tạo đơn.", ToastLevel.Warning);
             return;
         }
 
-        // 2) Kiểm tra ít nhất 1 sản phẩm
         if (newPurchaseOrder.Items == null || !newPurchaseOrder.Items.Any())
         {
             ToastSvc.ShowToast("Vui lòng thêm ít nhất 1 sản phẩm vào phiếu.", ToastLevel.Warning);
             return;
         }
 
-        // 3) Đảm bảo ReceivedQuantity cho mọi item
         foreach (var it in newPurchaseOrder.Items)
         {
             if (it.ReceivedQuantity <= 0)
@@ -156,7 +183,6 @@
         }
         catch (Exception ex)
         {
-            // hiển thị lỗi cụ thể
             ToastSvc.ShowToast($"Lỗi khi tạo đơn: {ex.Message}", ToastLevel.Error);
         }
     }
