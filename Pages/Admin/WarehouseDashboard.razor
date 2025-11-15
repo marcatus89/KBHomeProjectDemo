@@ -1,11 +1,21 @@
 @page "/admin/warehouse"
+@page "/admin/warehouse/page/{OrderPage:int}/{PoPage:int}/{RrPage:int}"
 @page "/admin/warehouse/page/{OrderPage:int}/{PoPage:int}"
 @attribute [Authorize(Roles = "Admin, Warehouse")]
 @using Microsoft.EntityFrameworkCore
+@using DoAnTotNghiep.Models
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
-<h3>Bảng điều khiển Kho</h3>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex align-items-center">
+        <button class="btn btn-outline-secondary btn-sm" @onclick="GoBack" title="Quay lại">
+            <i class="bi bi-arrow-left">Quay lại</i>
+        </button>
+        <h3 class="mb-0 ms-3">Bảng điều khiển Kho</h3>
+    </div>
+</div>
 
 <div class="row">
     @* Cột 1: Đơn hàng cần xử lý để giao cho khách *@
@@ -41,19 +51,19 @@
                         <nav class="mt-3" aria-label="Orders page navigation">
                             <ul class="pagination justify-content-center">
                                 <li class="page-item @(orderCurrentPage == 1 ? "disabled" : "")">
-                                    <a class="page-link" href="@($"/admin/warehouse/page/{Math.Max(orderCurrentPage - 1, 1)}/{poCurrentPage}")">Trước</a>
+                                    <a class="page-link" href="@($"/admin/warehouse/page/{Math.Max(orderCurrentPage - 1, 1)}/{poCurrentPage}/{rrCurrentPage}")">Trước</a>
                                 </li>
 
                                 @for (int i = 1; i <= orderTotalPages; i++)
                                 {
                                     var pageNum = i;
                                     <li class="page-item @(orderCurrentPage == pageNum ? "active" : "")">
-                                        <a class="page-link" href="@($"/admin/warehouse/page/{pageNum}/{poCurrentPage}")">@pageNum</a>
+                                        <a class="page-link" href="@($"/admin/warehouse/page/{pageNum}/{poCurrentPage}/{rrCurrentPage}")">@pageNum</a>
                                     </li>
                                 }
 
                                 <li class="page-item @(orderCurrentPage == orderTotalPages ? "disabled" : "")">
-                                    <a class="page-link" href="@($"/admin/warehouse/page/{Math.Min(orderCurrentPage + 1, orderTotalPages)}/{poCurrentPage}")">Sau</a>
+                                    <a class="page-link" href="@($"/admin/warehouse/page/{Math.Min(orderCurrentPage + 1, orderTotalPages)}/{poCurrentPage}/{rrCurrentPage}")">Sau</a>
                                 </li>
                             </ul>
                         </nav>
@@ -63,9 +73,9 @@
         </div>
     </div>
 
-    @* Cột 2: Đơn nhập hàng đang chờ nhận *@
+    @* Cột 2: Đơn nhập hàng đang chờ nhận + Phiếu thu hồi đang chờ *@
     <div class="col-md-6">
-        <div class="card">
+        <div class="card mb-3">
             <div class="card-header bg-success text-white">
                 <span class="oi oi-clipboard"></span> Đơn nhập hàng đang chờ (Nhập kho)
             </div>
@@ -96,19 +106,88 @@
                         <nav class="mt-3" aria-label="PO page navigation">
                             <ul class="pagination justify-content-center">
                                 <li class="page-item @(poCurrentPage == 1 ? "disabled" : "")">
-                                    <a class="page-link" href="@($"/admin/warehouse/page/{orderCurrentPage}/{Math.Max(poCurrentPage - 1, 1)}")">Trước</a>
+                                    <a class="page-link" href="@($"/admin/warehouse/page/{orderCurrentPage}/{Math.Max(poCurrentPage - 1, 1)}/{rrCurrentPage}")">Trước</a>
                                 </li>
 
                                 @for (int i = 1; i <= poTotalPages; i++)
                                 {
                                     var pageNum = i;
                                     <li class="page-item @(poCurrentPage == pageNum ? "active" : "")">
-                                        <a class="page-link" href="@($"/admin/warehouse/page/{orderCurrentPage}/{pageNum}")">@pageNum</a>
+                                        <a class="page-link" href="@($"/admin/warehouse/page/{orderCurrentPage}/{pageNum}/{rrCurrentPage}")">@pageNum</a>
                                     </li>
                                 }
 
                                 <li class="page-item @(poCurrentPage == poTotalPages ? "disabled" : "")">
-                                    <a class="page-link" href="@($"/admin/warehouse/page/{orderCurrentPage}/{Math.Min(poCurrentPage + 1, poTotalPages)}")">Sau</a>
+                                    <a class="page-link" href="@($"/admin/warehouse/page/{orderCurrentPage}/{Math.Min(poCurrentPage + 1, poTotalPages)}/{rrCurrentPage}")">Sau</a>
+                                </li>
+                            </ul>
+                        </nav>
+                    }
+                }
+            </div>
+        </div>
+
+        @* Card for Return Receipts awaiting warehouse confirmation *@
+        <div class="card">
+            <div class="card-header bg-danger text-white">
+                <span class="oi oi-loop"></span> Phiếu thu hồi đang chờ (Thu hồi hàng)
+            </div>
+            <div class="card-body">
+                @if (returnReceiptsToReceive == null)
+                {
+                    <LoadingSpinner />
+                }
+                else if (!returnReceiptsToReceive.Any())
+                {
+                    <div class="alert alert-info mt-3">Không có phiếu thu hồi nào đang chờ.</div>
+                }
+                else
+                {
+                    <ul class="list-group">
+                        @foreach (var rr in returnReceiptsToReceive)
+                        {
+                            var hasMismatch = rr.Items != null && rr.Items.Any(i => i.ReceivedQuantity != i.Quantity);
+
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <div>
+                                    <div class="fw-semibold">
+                                        Phiếu thu hồi @rr.ReturnReceiptNumber
+                                        <span class="text-muted small"> - Đơn #@(rr.RelatedOrderId ?? 0)</span>
+                                    </div>
+
+                                    <div class="mt-1">
+                                        @if (hasMismatch)
+                                        {
+                                            <span class="badge bg-info text-dark me-2">Có chênh lệch</span>
+                                        }
+                                        <span class="badge @GetRrBadgeClass(rr.Status)">@rr.Status</span>
+                                        <small class="text-muted ms-2"> @rr.CreatedAt.ToLocalTime().ToString("g")</small>
+                                    </div>
+                                </div>
+
+                                <a href="@($"/admin/return-receipts/{rr.Id}")" class="btn btn-sm btn-secondary">Xem/Nhận hàng</a>
+                            </li>
+                        }
+                    </ul>
+
+                    @if (rrTotalPages > 1)
+                    {
+                        <nav class="mt-3" aria-label="RR page navigation">
+                            <ul class="pagination justify-content-center">
+                                <li class="page-item @(rrCurrentPage == 1 ? "disabled" : "")">
+                                    <a class="page-link" href="@($"/admin/warehouse/page/{orderCurrentPage}/{poCurrentPage}/{Math.Max(rrCurrentPage - 1, 1)}")">Trước</a>
+                                </li>
+
+                                @for (int i = 1; i <= rrTotalPages; i++)
+                                {
+                                    var pageNum = i;
+                                    <li class="page-item @(rrCurrentPage == pageNum ? "active" : "")">
+                                        <a class="page-link" href="@($"/admin/warehouse/page/{orderCurrentPage}/{poCurrentPage}/{pageNum}")">@pageNum</a>
+                                    </li>
+                                }
+
+                                <li class="page-item @(rrCurrentPage == rrTotalPages ? "disabled" : "")">
+                                    <a class="page-link" href="@($"/admin/warehouse/page/{orderCurrentPage}/{poCurrentPage}/{Math.Min(rrCurrentPage + 1, rrTotalPages)}")">Sau</a>
                                 </li>
                             </ul>
                         </nav>
@@ -120,13 +199,15 @@
 </div>
 
 @code {
-    // Route parameters (Product.razor style but 2 params: OrderPage, PoPage)
+    // Route parameters (Product.razor style but 3 params: OrderPage, PoPage, RrPage)
     [Parameter] public int OrderPage { get; set; } = 1;
     [Parameter] public int PoPage { get; set; } = 1;
+    [Parameter] public int RrPage { get; set; } = 1;
 
     // Data (paged)
     private List<Order>? ordersToFulfill;
     private List<PurchaseOrder>? purchaseOrdersToReceive;
+    private List<ReturnReceipt>? returnReceiptsToReceive;
 
     // Pagination state for orders
     private int orderCurrentPage = 1;
@@ -140,14 +221,22 @@
     private int poTotalPages = 1;
     private int poTotalItems = 0;
 
+    // Pagination state for return receipts
+    private int rrCurrentPage = 1;
+    private int rrPageSize = 5;
+    private int rrTotalPages = 1;
+    private int rrTotalItems = 0;
+
     protected override async Task OnParametersSetAsync()
     {
         // set current pages from route params
         orderCurrentPage = OrderPage > 0 ? OrderPage : 1;
         poCurrentPage = PoPage > 0 ? PoPage : 1;
+        rrCurrentPage = RrPage > 0 ? RrPage : 1;
 
         await LoadOrdersPage(orderCurrentPage);
         await LoadPurchaseOrdersPage(poCurrentPage);
+        await LoadReturnReceiptsPage(rrCurrentPage);
     }
 
     private async Task LoadOrdersPage(int page)
@@ -199,16 +288,78 @@
             .ToListAsync();
     }
 
+    private async Task LoadReturnReceiptsPage(int page)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        // Hiển thị phiếu đang chờ kho ("Đã đặt hàng") và phiếu đang "Chờ phê duyệt"
+        IQueryable<ReturnReceipt> baseQ = db.ReturnReceipts
+            .AsNoTracking()
+            .Include(rr => rr.Items)
+            .Where(rr => rr.Status == "Đã đặt hàng" || rr.Status == "Chờ phê duyệt")
+            .OrderByDescending(rr => rr.CreatedAt);
+
+        rrTotalItems = await baseQ.CountAsync();
+        rrTotalPages = Math.Max(1, (int)Math.Ceiling((double)rrTotalItems / rrPageSize));
+        rrCurrentPage = Math.Clamp(page, 1, rrTotalPages);
+
+        returnReceiptsToReceive = await baseQ
+            .Skip((rrCurrentPage - 1) * rrPageSize)
+            .Take(rrPageSize)
+            .ToListAsync();
+    }
+
     // Optional programmatic navigation helpers (not strictly necessary; anchors already navigate)
     private void ChangeOrderPage(int page)
     {
         page = Math.Clamp(page, 1, orderTotalPages);
-        Navigation.NavigateTo($"/admin/warehouse/page/{page}/{poCurrentPage}");
+        Navigation.NavigateTo($"/admin/warehouse/page/{page}/{poCurrentPage}/{rrCurrentPage}");
     }
 
     private void ChangePoPage(int page)
     {
         page = Math.Clamp(page, 1, poTotalPages);
-        Navigation.NavigateTo($"/admin/warehouse/page/{orderCurrentPage}/{page}");
+        Navigation.NavigateTo($"/admin/warehouse/page/{orderCurrentPage}/{page}/{rrCurrentPage}");
+    }
+
+    private void ChangeRrPage(int page)
+    {
+        page = Math.Clamp(page, 1, rrTotalPages);
+        Navigation.NavigateTo($"/admin/warehouse/page/{orderCurrentPage}/{poCurrentPage}/{page}");
+    }
+
+    private string GetRrBadgeClass(string? status)
+    {
+        if (string.IsNullOrEmpty(status)) return "bg-secondary";
+        if (status.StartsWith("Đã nhận hàng")) return "bg-success";
+        if (status.StartsWith("Bị từ chối")) return "bg-danger text-white";
+        if (status == "Chờ phê duyệt") return "bg-info text-dark";
+        if (status == "Đã đặt hàng") return "bg-warning text-dark";
+        return "bg-secondary";
+    }
+
+    private async Task GoBack()
+    {
+        try
+        {
+            var handled = false;
+            try
+            {
+                handled = await JS.InvokeAsync<bool>("appHelpers.goBackIfPossible");
+            }
+            catch
+            {
+                handled = false;
+            }
+
+            if (!handled)
+            {
+                Navigation.NavigateTo("/admin");
+            }
+        }
+        catch
+        {
+            Navigation.NavigateTo("/admin");
+        }
     }
 }

@@ -61,14 +61,21 @@
             <div class="row align-items-end mb-3">
                 <div class="col-md-4">
                     <label class="fw-semibold">Số lượng</label>
-                    <InputNumber @bind-Value="newItem.Quantity" class="form-control" />
+                    @* Không cho nhập số âm/0 trên client *@
+                    <InputNumber @bind-Value="newItem.Quantity" class="form-control" min="0" step="1" />
                 </div>
                 <div class="col-md-4">
                     <label class="fw-semibold">Đơn giá nhập</label>
-                    <InputNumber @bind-Value="newItem.UnitPrice" class="form-control" />
+                    @* Không cho nhập âm trên client *@
+                    <InputNumber @bind-Value="newItem.UnitPrice" class="form-control" min="0" step="0.01" />
                 </div>
                 <div class="col-md-4 d-grid">
-                    <button type="button" class="btn btn-add-item" @onclick="AddItem">
+                    @* Nút chỉ disable khi Quantity <= 0 OR UnitPrice <= 0 *@
+                    <button type="button"
+                            class="btn btn-add-item"
+                            @onclick="AddItem"
+                            disabled="@(!CanAddItem())"
+                            title="@AddItemTooltip">
                         <i class="bi bi-plus-circle"></i> Thêm sản phẩm
                     </button>
                 </div>
@@ -86,19 +93,28 @@
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var item in newPurchaseOrder.Items)
+                    @if (newPurchaseOrder.Items != null && newPurchaseOrder.Items.Any())
                     {
-                        var productName = products?.FirstOrDefault(p => p.Id == item.ProductId)?.Name ?? "(Không rõ)";
+                        @foreach (var item in newPurchaseOrder.Items)
+                        {
+                            var productName = products?.FirstOrDefault(p => p.Id == item.ProductId)?.Name ?? "(Không rõ)";
+                            <tr>
+                                <td class="product-name" title="@productName">@productName</td>
+                                <td>@item.Quantity</td>
+                                <td>@item.UnitPrice.ToString("n0")</td>
+                                <td>@((item.Quantity * item.UnitPrice).ToString("n0"))</td>
+                                <td class="text-center">
+                                    <button type="button" class="btn btn-remove-item btn-sm" @onclick="() => RemoveItem(item)">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    }
+                    else
+                    {
                         <tr>
-                            <td class="product-name" title="@productName">@productName</td>
-                            <td>@item.Quantity</td>
-                            <td>@item.UnitPrice.ToString("n0")</td>
-                            <td>@((item.Quantity * item.UnitPrice).ToString("n0"))</td>
-                            <td class="text-center">
-                                <button type="button" class="btn btn-remove-item btn-sm" @onclick="() => RemoveItem(item)">
-                                    <i class="bi bi-trash"></i>
-                                </button>
-                            </td>
+                            <td colspan="5" class="text-center text-muted">Chưa có sản phẩm nào</td>
                         </tr>
                     }
                 </tbody>
@@ -106,7 +122,7 @@
         </div>
 
         <div class="card-footer text-end bg-light">
-            <button type="submit" class="btn btn-primary btn-lg me-2">
+            <button type="submit" class="btn btn-primary btn-lg me-2" disabled="@isProcessing">
                 <i class="bi bi-check-circle"></i> Tạo Đơn nhập hàng
             </button>
             <a href="/admin/purchase-orders" class="btn btn-outline-secondary btn-lg">
@@ -117,46 +133,94 @@
 </EditForm>
 
 @code {
-    private PurchaseOrder newPurchaseOrder = new();
+    private PurchaseOrder newPurchaseOrder = new() { Items = new List<PurchaseOrderItem>() };
     private PurchaseOrderItem newItem = new();
     private List<Supplier>? suppliers;
     private List<Product>? products;
+    private bool isProcessing = false;
 
     protected override async Task OnInitializedAsync()
     {
         suppliers = await DbContext.Suppliers.ToListAsync();
         products = await DbContext.Products.ToListAsync();
+
+        if (newPurchaseOrder.Items == null)
+            newPurchaseOrder.Items = new List<PurchaseOrderItem>();
+    }
+
+    // tooltip text
+    private string AddItemTooltip
+    {
+        get
+        {
+            if (newItem.Quantity <= 0 && newItem.UnitPrice <= 0) return "Số lượng và Đơn giá phải lớn hơn 0";
+            if (newItem.Quantity <= 0) return "Số lượng phải lớn hơn 0";
+            if (newItem.UnitPrice <= 0) return "Đơn giá phải lớn hơn 0";
+            return "Thêm sản phẩm";
+        }
+    }
+
+    // Enable button only when Quantity > 0 and UnitPrice > 0
+    private bool CanAddItem()
+    {
+        return newItem.Quantity > 0 && newItem.UnitPrice > 0;
     }
 
     private void AddItem()
     {
-        if (newItem.ProductId > 0 && newItem.Quantity > 0)
+        // Server-side validation to ensure correctness
+        if (newItem.Quantity <= 0)
+        {
+            ToastSvc.ShowToast("Số lượng phải lớn hơn 0.", ToastLevel.Warning);
+            return;
+        }
+        if (newItem.UnitPrice <= 0)
+        {
+            ToastSvc.ShowToast("Đơn giá phải lớn hơn 0.", ToastLevel.Warning);
+            return;
+        }
+        if (newItem.ProductId <= 0)
+        {
+            ToastSvc.ShowToast("Vui lòng chọn sản phẩm.", ToastLevel.Warning);
+            return;
+        }
+
+        var existing = newPurchaseOrder.Items.FirstOrDefault(i => i.ProductId == newItem.ProductId);
+        if (existing != null)
+        {
+            existing.Quantity += newItem.Quantity;
+            existing.ReceivedQuantity = Math.Max(existing.ReceivedQuantity, existing.Quantity);
+            existing.UnitPrice = newItem.UnitPrice;
+        }
+        else
         {
             var itemToAdd = new PurchaseOrderItem
             {
                 ProductId = newItem.ProductId,
                 Quantity = newItem.Quantity,
                 UnitPrice = newItem.UnitPrice,
-                ReceivedQuantity = newItem.Quantity
+                ReceivedQuantity = Math.Max(newItem.Quantity, 1)
             };
-
             newPurchaseOrder.Items.Add(itemToAdd);
-            newItem = new PurchaseOrderItem();
         }
-        else
-        {
-            ToastSvc.ShowToast("Vui lòng chọn sản phẩm và nhập số lượng lớn hơn 0.", ToastLevel.Warning);
-        }
+
+        // reset input
+        newItem = new PurchaseOrderItem();
     }
 
     private void RemoveItem(PurchaseOrderItem item)
     {
-        newPurchaseOrder.Items.Remove(item);
-        ToastSvc.ShowToast("Đã xóa sản phẩm khỏi danh sách.", ToastLevel.Info);
+        if (newPurchaseOrder.Items.Contains(item))
+        {
+            newPurchaseOrder.Items.Remove(item);
+            ToastSvc.ShowToast("Đã xóa sản phẩm khỏi danh sách.", ToastLevel.Info);
+        }
     }
 
     private async Task HandleCreatePurchaseOrder()
     {
+        if (isProcessing) return;
+
         if (newPurchaseOrder.SupplierId <= 0)
         {
             ToastSvc.ShowToast("Vui lòng chọn Nhà cung cấp trước khi tạo đơn.", ToastLevel.Warning);
@@ -169,12 +233,24 @@
             return;
         }
 
+        // Server-side validation: ensure all items valid
         foreach (var it in newPurchaseOrder.Items)
         {
-            if (it.ReceivedQuantity <= 0)
-                it.ReceivedQuantity = it.Quantity;
+            if (it.Quantity <= 0)
+            {
+                ToastSvc.ShowToast("Có sản phẩm có số lượng không hợp lệ (<= 0). Vui lòng kiểm tra lại.", ToastLevel.Warning);
+                return;
+            }
+            if (it.UnitPrice <= 0)
+            {
+                ToastSvc.ShowToast("Có sản phẩm có đơn giá không hợp lệ (<= 0). Vui lòng kiểm tra lại.", ToastLevel.Warning);
+                return;
+            }
+
+            if (it.ReceivedQuantity <= 0) it.ReceivedQuantity = it.Quantity;
         }
 
+        isProcessing = true;
         try
         {
             await PurchaseOrderSvc.CreatePurchaseOrderAsync(newPurchaseOrder);
@@ -184,6 +260,10 @@
         catch (Exception ex)
         {
             ToastSvc.ShowToast($"Lỗi khi tạo đơn: {ex.Message}", ToastLevel.Error);
+        }
+        finally
+        {
+            isProcessing = false;
         }
     }
 }

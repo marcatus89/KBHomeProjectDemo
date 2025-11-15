@@ -1,10 +1,20 @@
 @page "/admin/dashboard"
 @attribute [Authorize(Roles = "Admin")]
 @inject DashboardService DashboardSvc
+@inject IJSRuntime JS
+@inject NavigationManager NavigationManager
 @layout MainLayout
 
 <div class="container-fluid">
-    <h3 class="mb-4">Bảng điều khiển Tổng quan</h3>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="d-flex align-items-center">
+            <button class="btn btn-outline-secondary btn-sm me-3" @onclick="GoBack" title="Quay lại" aria-label="Quay lại">
+                <i class="bi bi-arrow-left"></i>
+                <span class="d-none d-sm-inline ms-1">Quay lại</span>
+            </button>
+            <h3 class="mb-0">Bảng điều khiển Tổng quan</h3>
+        </div>
+    </div>
 
     @if (stats == null)
     {
@@ -76,5 +86,31 @@
     protected override async Task OnInitializedAsync()
     {
         stats = await DashboardSvc.GetDashboardStatsAsync();
+    }
+
+    private async Task GoBack()
+    {
+        try
+        {
+            var handled = false;
+            try
+            {
+                handled = await JS.InvokeAsync<bool>("appHelpers.goBackIfPossible");
+            }
+            catch
+            {
+                handled = false;
+            }
+
+            if (!handled)
+            {
+                // fallback về trang admin (root)
+                NavigationManager.NavigateTo("/admin");
+            }
+        }
+        catch
+        {
+            NavigationManager.NavigateTo("/admin");
+        }
     }
 }

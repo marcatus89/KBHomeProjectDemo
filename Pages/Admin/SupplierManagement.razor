@@ -10,9 +10,15 @@
 <h3>Quản lý Nhà cung cấp</h3>
 
 <div class="d-flex justify-content-between align-items-center mb-3 gap-3 flex-wrap">
-    <a href="/admin/suppliers/add" class="btn btn-primary d-flex align-items-center">
-        <i class="bi bi-plus-lg me-2"></i> Thêm Nhà cung cấp
-    </a>
+    <div class="d-flex align-items-center gap-2">
+        <button class="btn btn-outline-secondary btn-sm" @onclick="GoBack" title="Quay lại trang trước">
+            <i class="bi bi-arrow-left me-1"></i> Quay lại
+        </button>
+
+        <a href="/admin/suppliers/add" class="btn btn-primary d-flex align-items-center">
+            <i class="bi bi-plus-lg me-2"></i> Thêm Nhà cung cấp
+        </a>
+    </div>
 
     <div class="ms-auto w-100" style="max-width:900px;">
         <div class="card p-2 shadow-sm">
@@ -300,5 +306,30 @@ else
     {
         _disposed = true;
         _loadLock.Dispose();
+    }
+
+    private async Task GoBack()
+    {
+        try
+        {
+            var handled = false;
+            try
+            {
+                handled = await JS.InvokeAsync<bool>("eval", "(function(){ if (history.length > 1) { history.back(); return true; } return false; })()");
+            }
+            catch
+            {
+                handled = false;
+            }
+
+            if (!handled)
+            {
+                Navigation.NavigateTo("/admin");
+            }
+        }
+        catch
+        {
+            Navigation.NavigateTo("/admin");
+        }
     }
 }

@@ -1,46 +1,311 @@
 @page "/admin"
 @attribute [Authorize(Roles = "Admin, Sales, Warehouse, Logistics, Purchasing")]
+@using Microsoft.EntityFrameworkCore
+@using DoAnTotNghiep.Models
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
 
-<h3>Chào mừng đến Trang Quản trị</h3>
+@* Import shared component namespace nếu bạn đã tạo FeatureCard trong thư mục Shared *@
+@using DoAnTotNghiep.Shared
 
-<p>Đây là khu vực quản lý nội bộ dành cho các phòng ban.</p>
+<div class="admin-modern container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="mb-1">Trang Quản trị</h2>
+            <div class="text-muted">Chào mừng đến khu vực quản lý nội bộ.</div>
+            <div class="text-muted small mt-1">Xin chào, <strong>@(currentUserName ?? "Quản trị viên")</strong></div>
+        </div>
 
-<div class="mt-4 d-grid gap-2 d-md-block">
-    
-    @* Các chức năng chỉ Admin mới thấy *@
-    <AuthorizeView Roles="Admin">
-         <a href="/admin/dashboard" class="btn btn-primary">Dashboard</a>
-        <a href="/admin/products" class="btn btn-info">Quản lý Sản phẩm</a>
-        <a href="/admin/users" class="btn btn-success">Quản lý Người dùng</a>
-        <a href="/admin/categories" class="btn btn-secondary">Quản lý Danh mục</a>
-    </AuthorizeView>
+        <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="Refresh" disabled="@isLoading">
+                <i class="bi bi-arrow-clockwise me-1"></i> Làm mới
+            </button>
+            <a class="btn btn-primary btn-sm" href="/admin/dashboard">Dashboard</a>
+        </div>
+    </div>
 
-    @* Chức năng xem toàn bộ đơn hàng *@
-    <AuthorizeView Roles="Admin, Sales, Warehouse, Logistics">
-        <a href="/admin/orders" class="btn btn-warning">Quản lý Đơn hàng (Toàn bộ)</a>
-    </AuthorizeView>
-    
-    @* Các chức năng của Phân hệ Mua hàng *@
-    <AuthorizeView Roles="Admin, Purchasing">
-         <a href="/admin/suppliers" class="btn btn-dark">Quản lý Nhà cung cấp</a>
-    </AuthorizeView>
-    <AuthorizeView Roles="Admin, Purchasing, Warehouse">
-         <a href="/admin/purchase-orders" class="btn btn-primary">Quản lý Đơn nhập hàng</a>
-    </AuthorizeView>
-    
-    @* Link đến các Bảng điều khiển của từng phân hệ *@
-    <AuthorizeView Roles="Admin, Sales">
-         <a href="/admin/sales" class="btn" style="background-color: #dc22b1; color: white;">Phân hệ Sales</a>
-    </AuthorizeView>
-    
-    <AuthorizeView Roles="Admin, Warehouse">
-         <a href="/admin/warehouse" class="btn" style="background-color: #fd7e14; color: white;">Phân hệ Kho</a>
-         <a href="/admin/stock-take" class="btn" style="background-color: #585aeb; color: rgb(241, 236, 236);">Kiểm kê Kho</a>
-    </AuthorizeView>
+    @if (isLoading)
+    {
+        <div class="text-center py-5">
+            <LoadingSpinner />
+        </div>
+    }
+    else
+    {
+        <!-- KPI row -->
+        <div class="row g-3 mb-4">
+            <div class="col-6 col-md-3">
+                <div class="kpi card p-3">
+                    <div class="d-flex align-items-center">
+                        <div class="kpi-icon me-3 icon-bg-primary"><i class="bi bi-tag"></i></div>
+                        <div>
+                            <div class="text-muted small">Sản phẩm</div>
+                            <div class="h5 mb-0">@productsCount</div>
+                            <small class="text-muted">Tổng sản phẩm</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
-    <AuthorizeView Roles="Admin, Logistics">
-         <a href="/admin/logistics" class="btn" style="background-color: #6f42c1; color: white;">Phân hệ Giao nhận</a>
-    </AuthorizeView>
+            <div class="col-6 col-md-3">
+                <div class="kpi card p-3">
+                    <div class="d-flex align-items-center">
+                        <div class="kpi-icon me-3 icon-bg-warning"><i class="bi bi-cart-check"></i></div>
+                        <div>
+                            <div class="text-muted small">Đơn hàng cần xử lý</div>
+                            <div class="h5 mb-0">@ordersPendingCount</div>
+                            <small class="text-muted">Chưa hoàn tất</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
+            <div class="col-6 col-md-3">
+                <div class="kpi card p-3">
+                    <div class="d-flex align-items-center">
+                        <div class="kpi-icon me-3 icon-bg-success"><i class="bi bi-box-arrow-in-down"></i></div>
+                        <div>
+                            <div class="text-muted small">Phiếu nhập chờ</div>
+                            <div class="h5 mb-0">@poPendingCount</div>
+                            <small class="text-muted">Chưa về 'Đã nhận hàng'</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-6 col-md-3">
+                <div class="kpi card p-3">
+                    <div class="d-flex align-items-center">
+                        <div class="kpi-icon me-3 icon-bg-danger"><i class="bi bi-arrow-repeat"></i></div>
+                        <div>
+                            <div class="text-muted small">Phiếu thu hồi</div>
+                            <div class="h5 mb-0">@rrPendingCount</div>
+                            <small class="text-muted">Chưa về 'Đã nhận hàng'</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Feature cards using FeatureCard component (keeps all links/roles) -->
+        <div class="row g-3 mb-4">
+            <div class="col-sm-6 col-lg-4">
+                <AuthorizeView Roles="Admin">
+                    <FeatureCard Title="Quản trị hệ thống"
+                                 Subtitle="Các chức năng chỉ Admin mới thấy"
+                                 IconClass="bi bi-shield-lock"
+                                 IconBgClass="icon-bg-admin"
+                                 PrimaryText="Dashboard"
+                                 PrimaryLink="/admin/dashboard"
+                                 SecondaryText="Quản lý Sản phẩm"
+                                 SecondaryLink="/admin/products"
+                                 Badge="@string.Empty" />
+                </AuthorizeView>
+            </div>
+
+            <div class="col-sm-6 col-lg-4">
+                <AuthorizeView Roles="Admin, Sales, Warehouse, Logistics">
+                    <FeatureCard Title="Quản lý Đơn hàng"
+                                 Subtitle="Xem & xử lý toàn bộ đơn hàng"
+                                 IconClass="bi bi-card-list"
+                                 IconBgClass="icon-bg-orders"
+                                 PrimaryText="Quản lý Đơn hàng"
+                                 PrimaryLink="/admin/orders"
+                                 SecondaryText="Xem Bảng điều khiển"
+                                 SecondaryLink="/admin/dashboard" />
+                </AuthorizeView>
+            </div>
+
+            <div class="col-sm-6 col-lg-4">
+                <AuthorizeView Roles="Admin, Purchasing">
+                    <FeatureCard Title="Mua hàng"
+                                 Subtitle="Nhà cung cấp & Đơn nhập"
+                                 IconClass="bi bi-building"
+                                 IconBgClass="icon-bg-purchasing"
+                                 PrimaryText="Nhà cung cấp"
+                                 PrimaryLink="/admin/suppliers"
+                                 SecondaryText="Đơn nhập"
+                                 SecondaryLink="/admin/purchase-orders" />
+                </AuthorizeView>
+            </div>
+
+            <div class="col-sm-6 col-lg-4">
+                <AuthorizeView Roles="Admin, Sales">
+                    <FeatureCard Title="Phân hệ Sales"
+                                 Subtitle="Theo dõi giao dịch bán hàng"
+                                 IconClass="bi bi-bag-check"
+                                 IconBgClass="icon-bg-sales"
+                                 PrimaryText="Phân hệ Sales"
+                                 PrimaryLink="/admin/sales"
+                                 SecondaryText="Quản lý Đơn hàng"
+                                 SecondaryLink="/admin/orders" />
+                </AuthorizeView>
+            </div>
+
+            <div class="col-sm-6 col-lg-4">
+                <AuthorizeView Roles="Admin, Warehouse">
+                    <FeatureCard Title="Phân hệ Kho"
+                                 Subtitle="Nhập kho, xuất kho, kiểm kê"
+                                 IconClass="bi bi-box-seam"
+                                 IconBgClass="icon-bg-warehouse"
+                                 PrimaryText="Bảng điều khiển Kho"
+                                 PrimaryLink="/admin/warehouse"
+                                 SecondaryText="Kiểm kê Kho"
+                                 SecondaryLink="/admin/stock-take" />
+                </AuthorizeView>
+            </div>
+
+            <div class="col-sm-6 col-lg-4">
+                <AuthorizeView Roles="Admin, Logistics">
+                    <FeatureCard Title="Phân hệ Giao nhận"
+                                 Subtitle="Quản lý vận chuyển & giao nhận"
+                                 IconClass="bi bi-truck"
+                                 IconBgClass="icon-bg-logistics"
+                                 PrimaryText="Phân hệ Giao nhận"
+                                 PrimaryLink="/admin/logistics"
+                                 SecondaryText="Xem Đơn hàng"
+                                 SecondaryLink="/admin/orders" />
+                </AuthorizeView>
+            </div>
+        </div>
+
+        <!-- Recent section -->
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <strong>Đơn hàng mới nhất</strong>
+                        <a class="small" href="/admin/orders">Xem tất cả</a>
+                    </div>
+                    <div class="card-body p-0">
+                        @if (recentOrders == null)
+                        {
+                            <div class="p-3"><LoadingSpinner /></div>
+                        }
+                        else if (!recentOrders.Any())
+                        {
+                            <div class="p-3 text-muted">Không có đơn hàng mới.</div>
+                        }
+                        else
+                        {
+                            <ul class="list-group list-group-flush">
+                                @foreach (var o in recentOrders)
+                                {
+                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <div class="fw-semibold">#@o.Id - @o.CustomerName</div>
+                                            <div class="small text-muted">@o.OrderDate.ToLocalTime().ToString("g")</div>
+                                        </div>
+                                        <a class="btn btn-sm btn-outline-primary" href="@($"/admin/orders/{o.Id}")">Xem</a>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <strong>Phiếu thu hồi mới</strong>
+                        <a class="small" href="/admin/return-receipts">Xem tất cả</a>
+                    </div>
+                    <div class="card-body p-0">
+                        @if (recentRr == null)
+                        {
+                            <div class="p-3"><LoadingSpinner /></div>
+                        }
+                        else if (!recentRr.Any())
+                        {
+                            <div class="p-3 text-muted">Không có phiếu thu hồi mới.</div>
+                        }
+                        else
+                        {
+                            <ul class="list-group list-group-flush">
+                                @foreach (var rr in recentRr)
+                                {
+                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <div class="fw-semibold">@rr.ReturnReceiptNumber</div>
+                                            <div class="small text-muted">Đơn #@(rr.RelatedOrderId ?? 0) - @rr.CreatedAt.ToLocalTime().ToString("g")</div>
+                                        </div>
+                                        <a class="btn btn-sm btn-outline-secondary" href="@($"/admin/return-receipts/{rr.Id}")">Xem</a>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
 </div>
 
+@code {
+    private bool isLoading = true;
+
+    // KPI
+    private int productsCount = 0;
+    private int ordersPendingCount = 0;
+    private int poPendingCount = 0;
+    private int rrPendingCount = 0;
+
+    private string? currentUserName;
+
+    // Recent lists
+    private List<Order>? recentOrders;
+    private List<ReturnReceipt>? recentRr;
+
+    protected override async Task OnInitializedAsync()
+    {
+        isLoading = true;
+        try
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = auth.User;
+            currentUserName = user?.Identity?.Name ?? "Quản trị viên";
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            // Products: tổng sản phẩm
+            productsCount = await db.Products.CountAsync();
+
+            // Orders pending: đếm những đơn chưa ở trạng thái cuối ("Hoàn thành" hoặc "Đã hủy")
+            ordersPendingCount = await db.Orders
+                .AsNoTracking()
+                .Where(o => o.Status != "Hoàn thành" && o.Status != "Đã hủy")
+                .CountAsync();
+
+            // Purchase Orders pending: đếm PO mà chưa về "Đã nhận hàng" hoặc "Đã nhận hàng (có chênh lệch)"
+            poPendingCount = await db.PurchaseOrders
+                .AsNoTracking()
+                .Where(po => po.Status != "Đã nhận hàng" && po.Status != "Đã nhận hàng (có chênh lệch)")
+                .CountAsync();
+
+            // Return Receipts pending: đếm RR mà chưa về "Đã nhận hàng" hoặc "Đã nhận hàng (có chênh lệch)"
+            rrPendingCount = await db.ReturnReceipts
+                .AsNoTracking()
+                .Where(rr => rr.Status != "Đã nhận hàng" && rr.Status != "Đã nhận hàng (có chênh lệch)")
+                .CountAsync();
+
+            // Recent lists (lấy gần nhất 6)
+            recentOrders = await db.Orders.OrderByDescending(o => o.OrderDate).Take(6).AsNoTracking().ToListAsync();
+            recentRr = await db.ReturnReceipts.OrderByDescending(r => r.CreatedAt).Take(6).AsNoTracking().ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[Admin Index] Load error: " + ex);
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task Refresh()
+    {
+        await OnInitializedAsync();
+    }
+}

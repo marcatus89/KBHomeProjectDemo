@@ -1,0 +1,47 @@
+@using Microsoft.AspNetCore.Components
+
+<div class="feature-card card h-100">
+    <div class="card-body d-flex flex-column">
+        <div class="d-flex align-items-start">
+            <div class="fc-icon me-3 @IconBgClass">
+                <i class="@IconClass"></i>
+            </div>
+
+            <div class="flex-grow-1">
+                <h5 class="card-title mb-1">@Title</h5>
+                <p class="text-muted small mb-2">@Subtitle</p>
+            </div>
+
+            @if (!string.IsNullOrEmpty(Badge))
+            {
+                <div class="ms-2">
+                    <span class="badge @BadgeClass">@Badge</span>
+                </div>
+            }
+        </div>
+
+        <div class="mt-auto d-flex gap-2">
+            @if (!string.IsNullOrEmpty(PrimaryText))
+            {
+                <a class="btn btn-primary btn-sm flex-grow-1" href="@PrimaryLink">@PrimaryText</a>
+            }
+            @if (!string.IsNullOrEmpty(SecondaryText))
+            {
+                <a class="btn btn-outline-secondary btn-sm" href="@SecondaryLink">@SecondaryText</a>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string Subtitle { get; set; } = "";
+    [Parameter] public string IconClass { get; set; } = "bi bi-gear";
+    [Parameter] public string IconBgClass { get; set; } = "icon-bg-default";
+    [Parameter] public string PrimaryText { get; set; } = "";
+    [Parameter] public string PrimaryLink { get; set; } = "#";
+    [Parameter] public string SecondaryText { get; set; } = "";
+    [Parameter] public string SecondaryLink { get; set; } = "#";
+    [Parameter] public string Badge { get; set; } = "";
+    [Parameter] public string BadgeClass { get; set; } = "bg-danger text-white";
+}

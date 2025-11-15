@@ -7,20 +7,28 @@
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject NavigationManager Navigation
 @inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
 
-<h3 class="mb-3">Quản lý Đơn nhập hàng</h3>
-
-<AuthorizeView Roles="Admin, Purchasing">
-    <div class="mb-3">
-        <a class="btn btn-primary d-inline-flex align-items-center" href="/admin/purchase-orders/add">
-            <i class="bi bi-plus-lg me-2"></i> Tạo Đơn nhập hàng mới
-        </a>
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap">
+    <div class="d-flex align-items-center">
+        <h3 class="mb-0 ms-3">Quản lý Đơn nhập hàng</h3>
     </div>
-</AuthorizeView>
+
+    <AuthorizeView Roles="Admin, Purchasing">
+        <div class="mb-3">
+            <a class="btn btn-primary d-inline-flex align-items-center" href="/admin/purchase-orders/add">
+                <i class="bi bi-plus-lg me-2"></i> Tạo Đơn nhập hàng mới
+            </a>
+        </div>
+    </AuthorizeView>
+</div>
 
 <!-- SEARCH -->
 <div class="card mb-3 shadow-sm">
     <div class="card-body">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="GoBack" title="Quay lại" aria-label="Quay lại">
+            <i class="bi bi-arrow-left">Quay Lại</i>
+        </button>
         <div class="row g-2 align-items-center">
             <div class="col-md-6">
                 <div class="input-group">
@@ -297,5 +305,30 @@ else
 
         // default
         return "bg-warning text-dark";
+    }
+
+    private async Task GoBack()
+    {
+        try
+        {
+            var handled = false;
+            try
+            {
+                handled = await JS.InvokeAsync<bool>("eval", "(function(){ if (history.length > 1) { history.back(); return true; } return false; })()");
+            }
+            catch
+            {
+                handled = false;
+            }
+
+            if (!handled)
+            {
+                Navigation.NavigateTo("/admin");
+            }
+        }
+        catch
+        {
+            Navigation.NavigateTo("/admin");
+        }
     }
 }

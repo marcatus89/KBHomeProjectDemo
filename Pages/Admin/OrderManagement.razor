@@ -12,14 +12,26 @@
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
 
-<h3>Quản lý Đơn hàng</h3>
+@* Header with Back button consistent with other pages *@
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap">
+    <div class="d-flex align-items-center">
+        <button class="btn btn-outline-secondary btn-sm" @onclick="GoBack" title="Quay lại" aria-label="Quay lại">
+            <i class="bi bi-arrow-left"></i>
+            <span class="d-none d-sm-inline ms-1">Quay lại</span>
+        </button>
 
-<!-- THANH TÌM KIẾM (đã làm đẹp) -->
-<div class="row mb-3">
-    <div class="col-md-6">
+        <div class="ms-3">
+            <h3 class="mb-0">Quản lý Đơn hàng</h3>
+            <small class="text-muted">Danh sách & quản lý các đơn hàng theo phân quyền</small>
+        </div>
+    </div>
+
+    <!-- Search block: stays on the right (responsive) -->
+    <div class="flex-grow-1" style="min-width:320px; max-width:800px;">
         <div class="input-group">
             <span class="input-group-text"><i class="bi bi-search"></i></span>
-            <input @bind="searchTerm" @bind:event="oninput" class="form-control" placeholder="Tìm ID / Tên KH / Trạng thái..." />
+            <input @bind="searchTerm" @bind:event="oninput" class="form-control"
+                   placeholder="Tìm ID / Tên KH / Trạng thái..." aria-label="Tìm đơn hàng" />
             <button class="btn btn-outline-primary" @onclick="SearchOrders" title="Tìm kiếm">
                 <i class="bi bi-filter-circle me-1"></i> Tìm
             </button>
@@ -67,17 +79,10 @@ else
                         <td>@order.TotalAmount.ToString("n0") VNĐ</td>
                         <td class="text-end">
                             <div class="d-flex justify-content-end gap-2">
-                                <a class="btn btn-sm btn-outline-secondary" href="@($"admin/orders/{order.Id}")" title="Xem chi tiết">
-                                    <i class="bi bi-eye">Xem Chi Tiết</i>
+                                <a class="btn btn-sm btn-outline-secondary" href="@($"admin/orders/{order.Id}")"
+                                    title="Xem chi tiết">
+                                    <i class="bi bi-eye"></i> Xem
                                 </a>
-
-                                @* Hiển thị nút Hủy cho Admin hoặc Sales, và nếu trạng thái cho phép *@
-                                @if (CanCancel(order))
-                                {
-                                    <button class="btn btn-sm btn-danger" @onclick="() => ConfirmCancel(order.Id)" title="Hủy đơn">
-                                        <i class="bi bi-x-circle"></i> Hủy
-                                    </button>
-                                }
                             </div>
                         </td>
                     </tr>
@@ -93,9 +98,8 @@ else
             <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
                 <div>
                     <a class="btn btn-outline-secondary btn-sm rounded-pill d-flex align-items-center"
-                       href="@($"/admin/orders/page/{Math.Max(currentPage - 1, 1)}")"
-                       aria-disabled="@(currentPage == 1 ? "true" : "false")"
-                       title="Trang trước">
+                        href="@($"/admin/orders/page/{Math.Max(currentPage - 1, 1)}")"
+                        aria-disabled="@(currentPage == 1 ? "true" : "false")" title="Trang trước">
                         <i class="bi bi-chevron-left me-1"></i> Trước
                     </a>
                 </div>
@@ -125,11 +129,13 @@ else
                         var pageNum = i;
                         if (pageNum == currentPage)
                         {
-                            <a class="btn btn-primary btn-sm rounded-pill" href="@($"/admin/orders/page/{pageNum}")" aria-current="page">@pageNum</a>
+                            <a class="btn btn-primary btn-sm rounded-pill" href="@($"/admin/orders/page/{pageNum}")"
+                                aria-current="page">@pageNum</a>
                         }
                         else
                         {
-                            <a class="btn btn-outline-secondary btn-sm rounded-pill" href="@($"/admin/orders/page/{pageNum}")">@pageNum</a>
+                            <a class="btn btn-outline-secondary btn-sm rounded-pill"
+                                href="@($"/admin/orders/page/{pageNum}")">@pageNum</a>
                         }
                     }
 
@@ -139,15 +145,15 @@ else
                         {
                             <span class="text-muted px-2">…</span>
                         }
-                        <a class="btn btn-outline-secondary btn-sm rounded-pill" href="@($"/admin/orders/page/{totalPages}")">@totalPages</a>
+                        <a class="btn btn-outline-secondary btn-sm rounded-pill"
+                            href="@($"/admin/orders/page/{totalPages}")">@totalPages</a>
                     }
                 </div>
 
                 <div class="d-flex align-items-center gap-3">
                     <a class="btn btn-outline-secondary btn-sm rounded-pill d-flex align-items-center"
-                       href="@($"/admin/orders/page/{Math.Min(currentPage + 1, totalPages)}")"
-                       aria-disabled="@(currentPage == totalPages ? "true" : "false")"
-                       title="Trang sau">
+                        href="@($"/admin/orders/page/{Math.Min(currentPage + 1, totalPages)}")"
+                        aria-disabled="@(currentPage == totalPages ? "true" : "false")" title="Trang sau">
                         Sau <i class="bi bi-chevron-right ms-1"></i>
                     </a>
 
@@ -229,21 +235,21 @@ else
             if (int.TryParse(s, out int idSearch))
             {
                 query = query.Where(o =>
-                    o.Id == idSearch ||
-                    EF.Functions.Like(o.CustomerName, $"%{s}%") ||
-                    EF.Functions.Like(o.Status, $"%{s}%"));
+                o.Id == idSearch ||
+                EF.Functions.Like(o.CustomerName, $"%{s}%") ||
+                EF.Functions.Like(o.Status, $"%{s}%"));
             }
             else
             {
                 query = query.Where(o =>
-                    EF.Functions.Like(o.CustomerName, $"%{s}%") ||
-                    EF.Functions.Like(o.Status, $"%{s}%"));
+                EF.Functions.Like(o.CustomerName, $"%{s}%") ||
+                EF.Functions.Like(o.Status, $"%{s}%"));
             }
         }
 
         allOrders = await query
-            .OrderByDescending(o => o.OrderDate)
-            .ToListAsync();
+        .OrderByDescending(o => o.OrderDate)
+        .ToListAsync();
 
         // Tính số trang
         totalPages = (int)Math.Ceiling((double)allOrders.Count / pageSize);
@@ -255,9 +261,9 @@ else
 
         // Chia trang
         pagedOrders = allOrders
-            .Skip((currentPage - 1) * pageSize)
-            .Take(pageSize)
-            .ToList();
+        .Skip((currentPage - 1) * pageSize)
+        .Take(pageSize)
+        .ToList();
     }
 
     private async Task SearchOrders()
@@ -317,38 +323,29 @@ else
         return false;
     }
 
-    private async Task ConfirmCancel(int orderId)
+    
+    private async Task GoBack()
     {
-        var ok = await JS.InvokeAsync<bool>("confirm", $"Bạn có chắc muốn hủy đơn #{orderId}?");
-        if (!ok) return;
-
-        // Debug: show quantities before cancel
-        await using var dbDebug = await DbFactory.CreateDbContextAsync();
-        var details = await dbDebug.OrderDetails.Where(d => d.OrderId == orderId).ToListAsync();
-        foreach (var d in details)
+        try
         {
-            var p = await dbDebug.Products.FindAsync(d.ProductId);
-            Console.WriteLine($"BEFORE cancel: Product {d.ProductId} stock={p?.StockQuantity} will add {d.Quantity}");
-        }
-
-        var result = await OrderSvc.CancelOrderAsync(orderId, currentUser);
-        if (result.Success)
-        {
-            ToastSvc.ShowToast($"Đã hủy đơn #{orderId} và trả hàng về kho.", ToastLevel.Success);
-
-            // Debug: show quantities after cancel
-            await using var dbDebug2 = await DbFactory.CreateDbContextAsync();
-            foreach (var d in details)
+            var handled = false;
+            try
             {
-                var p2 = await dbDebug2.Products.FindAsync(d.ProductId);
-                Console.WriteLine($"AFTER cancel: Product {d.ProductId} stock={p2?.StockQuantity}");
+                handled = await JS.InvokeAsync<bool>("appHelpers.goBackIfPossible");
+            }
+            catch
+            {
+                handled = false;
             }
 
-            await LoadOrders();
+            if (!handled)
+            {
+                Navigation.NavigateTo("/admin");
+            }
         }
-        else
+        catch
         {
-            ToastSvc.ShowToast(result.ErrorMessage, ToastLevel.Error);
+            Navigation.NavigateTo("/admin");
         }
     }
 }

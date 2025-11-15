@@ -1,0 +1,557 @@
+@page "/admin/return-receipts/{ReturnReceiptId:int}"
+@attribute [Authorize(Roles = "Admin, Purchasing, Warehouse")]
+@using Microsoft.EntityFrameworkCore
+@using DoAnTotNghiep.Models
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
+@inject ToastService ToastSvc
+@inject AuthenticationStateProvider AuthStateProvider
+
+<h3>Chi tiết Phiếu thu hồi #@ReturnReceiptId</h3>
+
+@if (isLoading)
+{
+    <LoadingSpinner />
+}
+else if (returnReceipt == null)
+{
+    <div class="alert alert-warning">Không tìm thấy phiếu thu hồi.</div>
+}
+else
+{
+    <div id="printable-area" class="printable-container">
+        <h2 class="text-center">PHIẾU THU HỒI</h2>
+        <p class="text-center"><strong>Số phiếu:</strong> @returnReceipt.ReturnReceiptNumber</p>
+        <hr />
+        <p><strong>Đơn liên quan:</strong> @(returnReceipt.RelatedOrderId?.ToString() ?? "-")</p>
+        <p><strong>Ngày tạo:</strong> @returnReceipt.CreatedAt.ToString("dd/MM/yyyy")</p>
+
+        <table class="table table-bordered mt-4">
+            <thead>
+                <tr>
+                    <th>STT</th>
+                    <th>Tên Sản phẩm</th>
+                    <th>Số lượng (đề nghị)</th>
+                    <th>Số lượng nhận (thực tế)</th>
+                    <th>Đơn giá</th>
+                    <th>Thành tiền</th>
+                </tr>
+            </thead>
+            <tbody>
+                @{
+                    int count = 1;
+                    decimal total = 0;
+                }
+                @foreach (var item in returnReceipt.Items)
+                {
+                    var qtyReceived = item.ReceivedQuantity;
+                    var subtotal = qtyReceived * item.UnitPrice;
+                    total += subtotal;
+                    <tr>
+                        <td>@(count++)</td>
+                        <td>@item.Product?.Name</td>
+                        <td>@item.Quantity</td>
+                        <td>@qtyReceived</td>
+                        <td>@item.UnitPrice.ToString("n0")</td>
+                        <td>@subtotal.ToString("n0")</td>
+                    </tr>
+                }
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="5" class="text-end"><strong>Tổng cộng</strong></td>
+                    <td><strong>@total.ToString("n0") VNĐ</strong></td>
+                </tr>
+            </tfoot>
+        </table>
+
+        <div class="signature-section">
+            <div class="signature-box">
+                <p><strong>Người lập phiếu</strong></p>
+                <p>(Ký, họ tên)</p>
+            </div>
+            <div class="signature-box">
+                <p><strong>Thủ kho</strong></p>
+                <p>(Ký, họ tên)</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="display-area" class="card mt-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <div>
+                <strong>Số phiếu:</strong> @returnReceipt.ReturnReceiptNumber |
+                <strong>Đơn liên quan:</strong> @(returnReceipt.RelatedOrderId?.ToString() ?? "-") |
+                <strong>Trạng thái:</strong>
+                @{
+                    var actualStatus = returnReceipt.Status ?? string.Empty;
+                    var displayStatus = GetDisplayStatus(actualStatus);
+                    var badgeClass = GetBadgeClass(actualStatus, displayStatus);
+                }
+                <span class="badge @badgeClass" title="@(GetBadgeTitle(actualStatus))">@displayStatus</span>
+            </div>
+            <div>
+                <button class="btn btn-outline-secondary me-2" @onclick="Print"><span class="oi oi-print"></span> In Phiếu</button>
+                <br />
+                @if (canReceive)
+                {
+                    <button class="btn btn-success me-2" @onclick="HandleReceiveItems" disabled="@isProcessing">Xác nhận</button>
+                }
+
+                @if (isAdmin && actualStatus == "Chờ phê duyệt")
+                {
+                    <button class="btn btn-primary me-1" @onclick="AdminApprove" disabled="@isProcessing">Phê duyệt và Nhập</button>
+                    <button class="btn btn-danger" @onclick="AdminReject" disabled="@isProcessing">Từ chối</button>
+                }
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(returnReceipt.RejectionReason) && isAdmin)
+        {
+            <div class="alert alert-danger mt-2 mx-3">
+                <strong>Đã bị từ chối bởi:</strong> @returnReceipt.RejectedByEmail
+                <br />
+                <strong>Ngày:</strong> @returnReceipt.RejectedAt?.ToLocalTime().ToString("g")
+                <br />
+                <strong>Lý do:</strong> @returnReceipt.RejectionReason
+            </div>
+        }
+
+        <div class="card-body">
+            <h5 class="card-title">Danh sách sản phẩm</h5>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Sản phẩm</th>
+                        <th>Số lượng đề nghị</th>
+                        <th>Số lượng nhận</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in returnReceipt.Items)
+                    {
+                        <tr>
+                            <td>@item.Product?.Name</td>
+                            <td>@item.Quantity</td>
+                            <td style="width:180px;">
+                                <input type="number"
+                                       class="form-control"
+                                       min="0"
+                                       value="@item.ReceivedQuantity"
+                                       @oninput="@(e => OnReceivedQtyChanged(item, e))" />
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card-footer">
+            <a href="/admin/return-receipts" class="btn btn-secondary">Quay lại</a>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int ReturnReceiptId { get; set; }
+
+    private ReturnReceipt? returnReceipt;
+    private bool isLoading = true;
+    private bool isProcessing = false;
+    private bool canReceive = false;
+    private bool isAdmin = false;
+    private bool isWarehouse = false;
+    private string? currentUsername;
+
+    protected override async Task OnInitializedAsync()
+    {
+        isLoading = true;
+        try
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = auth.User;
+            isAdmin = user?.IsInRole("Admin") ?? false;
+            isWarehouse = user?.IsInRole("Warehouse") ?? false;
+            currentUsername = user?.Identity?.Name ?? "unknown";
+
+            await LoadReturnReceipt();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[ReturnReceiptDetail] Init error: " + ex);
+            ToastSvc.ShowToast("Lỗi khi khởi tạo trang.", ToastLevel.Error);
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task LoadReturnReceipt()
+    {
+        isLoading = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            returnReceipt = await db.ReturnReceipts
+                                    .Include(rr => rr.Items)
+                                        .ThenInclude(i => i.Product)
+                                    .FirstOrDefaultAsync(rr => rr.Id == ReturnReceiptId);
+
+            if (returnReceipt != null)
+            {
+                foreach (var it in returnReceipt.Items)
+                {
+                    if (it.ReceivedQuantity <= 0)
+                        it.ReceivedQuantity = it.Quantity;
+                }
+
+                canReceive = returnReceipt.Status == "Đã đặt hàng"
+                             || (isWarehouse && !string.IsNullOrWhiteSpace(returnReceipt.RejectionReason));
+
+                if (isWarehouse && !string.IsNullOrWhiteSpace(returnReceipt.RejectionReason))
+                {
+                    var key = $"rr_rejection_seen_{returnReceipt.Id}_{currentUsername}";
+                    try
+                    {
+                        var seen = await JSRuntime.InvokeAsync<string>("localStorage.getItem", key);
+                        if (string.IsNullOrEmpty(seen))
+                        {
+                            var msg = $"Phiếu {returnReceipt.ReturnReceiptNumber} đã bị Admin từ chối. Lý do: {returnReceipt.RejectionReason}";
+                            ToastSvc.ShowToast(msg, ToastLevel.Warning);
+                            await JSRuntime.InvokeVoidAsync("localStorage.setItem", key, "1");
+                        }
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[ReturnReceiptDetail] Load error: " + ex);
+            ToastSvc.ShowToast("Lỗi khi tải phiếu thu hồi.", ToastLevel.Error);
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    // Không cho nhận số âm và cập nhật giá trị UI
+    private void OnReceivedQtyChanged(ReturnReceiptItem item, ChangeEventArgs e)
+    {
+        if (e?.Value == null)
+        {
+            item.ReceivedQuantity = 0;
+            return;
+        }
+        if (!int.TryParse(e.Value.ToString(), out int val))
+        {
+            item.ReceivedQuantity = 0;
+            return;
+        }
+        if (val < 0)
+        {
+            ToastSvc.ShowToast("Số lượng không thể là số âm. Đã đặt về 0.", ToastLevel.Warning);
+            item.ReceivedQuantity = 0;
+        }
+        else
+        {
+            item.ReceivedQuantity = val;
+        }
+    }
+
+    private async Task HandleReceiveItems()
+    {
+        if (returnReceipt == null) return;
+
+        if (returnReceipt.Status == "Đã nhận hàng" || (returnReceipt.Status != null && returnReceipt.Status.StartsWith("Đã nhận hàng")))
+        {
+            ToastSvc.ShowToast("Phiếu đã được nhận trước đó.", ToastLevel.Info);
+            return;
+        }
+
+        var mismatchItems = returnReceipt.Items.Where(i => i.ReceivedQuantity != i.Quantity).ToList();
+        if (mismatchItems.Any() && !isAdmin)
+        {
+            var ok = await JSRuntime.InvokeAsync<bool>("confirm", $"Có {mismatchItems.Count} sản phẩm có chênh lệch giữa số lượng đặt và số lượng nhận. Bạn muốn gửi yêu cầu phê duyệt đến Admin?");
+            if (!ok) return;
+
+            await RequestApproval();
+            return;
+        }
+
+        await ReceiveAndUpdateStock(returnReceipt.Items, returnReceipt.ReturnReceiptNumber);
+    }
+
+    private async Task RequestApproval()
+    {
+        if (returnReceipt == null) return;
+        isProcessing = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var rrDb = await db.ReturnReceipts
+                                .Include(rr => rr.Items)
+                                .FirstOrDefaultAsync(rr => rr.Id == returnReceipt.Id);
+            if (rrDb == null)
+            {
+                ToastSvc.ShowToast("Không tìm thấy phiếu trên cơ sở dữ liệu.", ToastLevel.Error);
+                return;
+            }
+
+            foreach (var it in rrDb.Items)
+            {
+                var uiItem = returnReceipt.Items.FirstOrDefault(x => x.Id == it.Id);
+                if (uiItem != null)
+                {
+                    if (uiItem.ReceivedQuantity < 0) uiItem.ReceivedQuantity = 0;
+                    it.ReceivedQuantity = uiItem.ReceivedQuantity;
+                }
+            }
+
+            rrDb.Status = "Chờ phê duyệt";
+            db.ReturnReceipts.Update(rrDb);
+            await db.SaveChangesAsync();
+
+            returnReceipt.Status = rrDb.Status;
+            canReceive = returnReceipt.Status == "Đã đặt hàng"
+                         || (isWarehouse && !string.IsNullOrEmpty(returnReceipt.RejectionReason));
+
+            ToastSvc.ShowToast("Đã gửi yêu cầu phê duyệt đến Admin.", ToastLevel.Info);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[ReturnReceiptDetail] RequestApproval error: " + ex);
+            ToastSvc.ShowToast("Lỗi khi gửi yêu cầu phê duyệt.", ToastLevel.Error);
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ReceiveAndUpdateStock(ICollection<ReturnReceiptItem> items, string returnReceiptNumber)
+    {
+        isProcessing = true;
+        try
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = auth.User;
+            var receiver = user?.Identity?.Name ?? "Hệ thống";
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await using var tx = await db.Database.BeginTransactionAsync();
+            try
+            {
+                var rrDb = await db.ReturnReceipts
+                                  .Include(r => r.Items)
+                                  .FirstOrDefaultAsync(r => r.Id == returnReceipt.Id);
+                if (rrDb == null)
+                {
+                    ToastSvc.ShowToast("Không tìm thấy phiếu trên cơ sở dữ liệu.", ToastLevel.Error);
+                    await tx.RollbackAsync();
+                    return;
+                }
+
+                // Xác định có chênh lệch hay không
+                bool hasMismatch = rrDb.Items.Any(i => i.ReceivedQuantity != i.Quantity);
+
+                // Cập nhật ReceivedQuantity theo UI (đã đẩy vào rrDb khi request approval hoặc UI)
+                foreach (var it in rrDb.Items)
+                {
+                    var prod = await db.Products.FirstOrDefaultAsync(p => p.Id == it.ProductId);
+                    if (prod == null) continue;
+
+                    int oldQty = prod.StockQuantity;
+                    prod.StockQuantity += it.ReceivedQuantity;
+                    db.Products.Update(prod);
+
+                    var log = new InventoryLog
+                    {
+                        ProductId = prod.Id,
+                        OldQuantity = oldQty,
+                        QuantityChange = it.ReceivedQuantity,
+                        NewQuantity = prod.StockQuantity,
+                        Reason = $"Thu hồi do hủy đơn #{rrDb.RelatedOrderId} (nhập bởi {receiver})",
+                        Timestamp = DateTime.UtcNow
+                    };
+                    await db.InventoryLogs.AddAsync(log);
+                }
+
+                // Nếu có chênh lệch thì đặt status khác để dễ nhận biết
+                rrDb.Status = hasMismatch ? "Đã nhận hàng (có chênh lệch)" : "Đã nhận hàng";
+                db.ReturnReceipts.Update(rrDb);
+                await db.SaveChangesAsync();
+                await tx.CommitAsync();
+
+                // Cập nhật UI object
+                returnReceipt.Status = rrDb.Status;
+                if (hasMismatch)
+                    ToastSvc.ShowToast("Nhập kho thu hồi thành công (có chênh lệch).", ToastLevel.Success);
+                else
+                    ToastSvc.ShowToast("Nhập kho thu hồi thành công.", ToastLevel.Success);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("[ReturnReceiptDetail] ReceiveAndUpdateStock error: " + ex);
+                await tx.RollbackAsync();
+                ToastSvc.ShowToast("Lỗi khi nhận hàng.", ToastLevel.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[ReturnReceiptDetail] top-level error: " + ex);
+            ToastSvc.ShowToast("Lỗi khi nhận hàng.", ToastLevel.Error);
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task AdminApprove()
+    {
+        if (returnReceipt == null) return;
+        isProcessing = true;
+        try
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = auth.User;
+            var who = user?.Identity?.Name ?? "Admin";
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var rrDb = await db.ReturnReceipts
+                              .Include(rr => rr.Items)
+                              .FirstOrDefaultAsync(rr => rr.Id == returnReceipt.Id);
+            if (rrDb == null)
+            {
+                ToastSvc.ShowToast("Không tìm thấy phiếu trên cơ sở dữ liệu.", ToastLevel.Error);
+                return;
+            }
+
+            // cập nhật số lượng theo UI
+            foreach (var it in rrDb.Items)
+            {
+                var uiItem = returnReceipt.Items.FirstOrDefault(x => x.Id == it.Id);
+                if (uiItem != null)
+                {
+                    if (uiItem.ReceivedQuantity < 0) uiItem.ReceivedQuantity = 0;
+                    it.ReceivedQuantity = uiItem.ReceivedQuantity;
+                }
+            }
+
+            // Chạy nhận và cập nhật tồn
+            await ReceiveAndUpdateStock(rrDb.Items, rrDb.ReturnReceiptNumber);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[ReturnReceiptDetail] AdminApprove error: " + ex);
+            ToastSvc.ShowToast("Lỗi khi phê duyệt.", ToastLevel.Error);
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private async Task AdminReject()
+    {
+        if (returnReceipt == null) return;
+        isProcessing = true;
+        try
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = auth.User;
+            var who = user?.Identity?.Name ?? "Admin";
+
+            var reason = await JSRuntime.InvokeAsync<string>("prompt", "Nhập lý do từ chối (bắt buộc):");
+            if (string.IsNullOrWhiteSpace(reason))
+            {
+                ToastSvc.ShowToast("Lý do từ chối không được trống.", ToastLevel.Warning);
+                return;
+            }
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var rrDb = await db.ReturnReceipts.FirstOrDefaultAsync(rr => rr.Id == returnReceipt.Id);
+            if (rrDb == null)
+            {
+                ToastSvc.ShowToast("Không tìm thấy phiếu trên cơ sở dữ liệu.", ToastLevel.Error);
+                return;
+            }
+
+            rrDb.RejectionReason = reason;
+            rrDb.RejectedByEmail = who;
+            rrDb.RejectedAt = DateTime.UtcNow;
+            rrDb.Status = "Đã đặt hàng"; // trả về trạng thái ban đầu
+            db.ReturnReceipts.Update(rrDb);
+            await db.SaveChangesAsync();
+
+            // cập nhật UI object
+            returnReceipt.RejectionReason = rrDb.RejectionReason;
+            returnReceipt.RejectedByEmail = rrDb.RejectedByEmail;
+            returnReceipt.RejectedAt = rrDb.RejectedAt;
+            returnReceipt.Status = rrDb.Status;
+
+            ToastSvc.ShowToast("Đã từ chối. Phiếu trả về 'Đã đặt hàng'.", ToastLevel.Info);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[ReturnReceiptDetail] AdminReject error: " + ex);
+            ToastSvc.ShowToast("Lỗi khi từ chối.", ToastLevel.Error);
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private void Print()
+    {
+        // Bạn có thể copy/reuse logic in PurchaseOrderDetail để in
+        JSRuntime.InvokeVoidAsync("print");
+    }
+
+    // Helpers: trạng thái / badge
+    private string GetDisplayStatus(string actualStatus)
+    {
+        if (isWarehouse && !string.IsNullOrEmpty(actualStatus) && actualStatus.StartsWith("Bị từ chối"))
+            return "Đã đặt hàng";
+
+        if (string.IsNullOrEmpty(actualStatus))
+            return "-";
+
+        return actualStatus;
+    }
+
+    private string GetBadgeClass(string actualStatus, string displayStatus)
+    {
+        if (!string.IsNullOrEmpty(actualStatus) && actualStatus.StartsWith("Đã nhận hàng"))
+            return "bg-success";
+
+        if (!string.IsNullOrEmpty(actualStatus) && actualStatus.StartsWith("Bị từ chối") && !isWarehouse)
+            return "bg-danger text-white";
+
+        if (actualStatus == "Chờ phê duyệt")
+            return "bg-info text-dark";
+
+        if (displayStatus == "Đã đặt hàng")
+            return "bg-warning text-dark";
+
+        return "bg-warning text-dark";
+    }
+
+    private string GetBadgeTitle(string actualStatus)
+    {
+        if (string.IsNullOrEmpty(actualStatus)) return "";
+        return actualStatus;
+    }
+}

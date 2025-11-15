@@ -120,6 +120,8 @@ namespace DoAnTotNghiep
             services.AddScoped<OrderService>();
             services.AddScoped<DashboardService>();
             services.AddScoped<PurchaseOrderService>();
+            services.AddScoped<ReturnReceiptService>();
+
 
             // AuthenticationStateProvider custom (if you implemented one)
             services.AddScoped<AuthenticationStateProvider, CustomAuthenticationStateProvider>();

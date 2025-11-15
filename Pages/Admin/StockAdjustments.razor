@@ -1,4 +1,5 @@
 @page "/admin/stock-adjustments"
+@page "/admin/stock-adjustments/page/{PageNumber:int}"
 @using Microsoft.EntityFrameworkCore
 @using Microsoft.AspNetCore.Components.Authorization
 @using System.Security.Claims
@@ -12,7 +13,20 @@
 @inject IJSRuntime JS
 @inject NavigationManager NavigationManager
 
-<h3>Danh sách Yêu cầu điều chỉnh tồn kho</h3>
+@* Optional page parameter (used when returning to Stock Take page) *@
+@code {
+    [Parameter]
+    public int PageNumber { get; set; } = 1;
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex align-items-center">
+        <button class="btn btn-outline-secondary btn-sm me-3" @onclick="GoBack" title="Quay lại" aria-label="Quay lại">
+            <i class="bi bi-arrow-left"></i> <span class="d-none d-sm-inline">Quay lại</span>
+        </button>
+        <h3 class="mb-0">Danh sách Yêu cầu điều chỉnh tồn kho</h3>
+    </div>
+</div>
 
 <div class="card mb-3">
     <div class="card-body">
@@ -211,7 +225,7 @@
             var log = new InventoryLog
             {
                 ProductId = prod.Id,
-                OldQuantity = oldQty,               // <<--- quan trọng: gán OldQuantity
+                OldQuantity = oldQty,
                 QuantityChange = change,
                 NewQuantity = prod.StockQuantity,
                 Reason = reason,
@@ -280,6 +294,34 @@
         {
             Console.WriteLine("[StockAdjustments] Reject error: " + ex);
             ToastSvc.ShowToast("Lỗi khi từ chối request.", ToastLevel.Error);
+        }
+    }
+
+    // ---------------- GoBack ----------------
+    private async Task GoBack()
+    {
+        try
+        {
+            var handled = false;
+            try
+            {
+                handled = await JS.InvokeAsync<bool>("appHelpers.goBackIfPossible");
+            }
+            catch
+            {
+                handled = false;
+            }
+
+            if (!handled)
+            {
+                // fallback to stock-take page with same page number if present
+                var page = PageNumber < 1 ? 1 : PageNumber;
+                NavigationManager.NavigateTo($"/admin/stock-take/page/{page}");
+            }
+        }
+        catch
+        {
+            NavigationManager.NavigateTo("/admin/stock-take");
         }
     }
 }

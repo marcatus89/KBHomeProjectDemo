@@ -174,7 +174,6 @@ else
     private string newStatus = string.Empty;
     private string? salesNoteInput;
 
-    // thứ tự trạng thái để kiểm tra "lùi trạng thái"
     private readonly List<string> _statusOrder = new()
     {
         "Chờ xác nhận",
@@ -205,14 +204,19 @@ else
         }
     }
 
+    // ⭐ Chỉ trạng thái "Đã hủy" là trạng thái cuối
     private bool IsTerminalOrFinal(string status)
     {
-        return string.Equals(status, "Hoàn thành", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(status, "Đã hủy", StringComparison.OrdinalIgnoreCase);
+        return string.Equals(status, "Đã hủy", StringComparison.OrdinalIgnoreCase);
     }
 
+    // ⭐ Cho phép Hoàn thành → Đã hủy
     private bool IsValidTransition(string oldStatus, string newStatus)
     {
+        if (string.Equals(oldStatus, "Hoàn thành", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(newStatus, "Đã hủy", StringComparison.OrdinalIgnoreCase))
+            return true;
+
         if (string.Equals(oldStatus, newStatus, StringComparison.OrdinalIgnoreCase))
             return true;
 
@@ -220,19 +224,14 @@ else
             return false;
 
         if (string.Equals(newStatus, "Đã hủy", StringComparison.OrdinalIgnoreCase))
-        {
-            if (string.Equals(oldStatus, "Hoàn thành", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(oldStatus, "Đã hủy", StringComparison.OrdinalIgnoreCase))
-                return false;
             return true;
-        }
 
         var oldIndex = _statusOrder.IndexOf(oldStatus);
         var newIndex = _statusOrder.IndexOf(newStatus);
+
         if (oldIndex < 0 || newIndex < 0)
-        {
             return false;
-        }
+
         return newIndex >= oldIndex;
     }
 
@@ -242,9 +241,10 @@ else
             return;
 
         var oldStatus = CurrentOrder.Status ?? string.Empty;
+
         if (!IsValidTransition(oldStatus, newStatus))
         {
-            ToastSvc.ShowToast("Không thể lùi hoặc thay đổi trạng thái theo hướng không hợp lệ.", ToastLevel.Warning);
+            ToastSvc.ShowToast("Không thể chuyển trạng thái không hợp lệ.", ToastLevel.Warning);
             return;
         }
 
@@ -254,9 +254,9 @@ else
             return;
         }
 
-        // Thực thi trong context mới và transaction
         await using var db = await DbFactory.CreateDbContextAsync();
         await using var tx = await db.Database.BeginTransactionAsync();
+
         try
         {
             var order = await db.Orders
@@ -271,50 +271,214 @@ else
                 return;
             }
 
-            if (!IsValidTransition(order.Status ?? string.Empty, newStatus))
+            if (!IsValidTransition(order.Status ?? "", newStatus))
             {
-                ToastSvc.ShowToast("Chuyển trạng thái không hợp lệ (sau khi kiểm tra lại).", ToastLevel.Warning);
+                ToastSvc.ShowToast("Chuyển trạng thái không hợp lệ.", ToastLevel.Warning);
                 await tx.RollbackAsync();
                 return;
             }
 
-            // Nếu hủy — trả tồn và ghi InventoryLog có OldQuantity
+            // ⭐ Nếu chuyển sang Đã hủy từ trạng thái khác (chưa Đã hủy)
             if (string.Equals(newStatus, "Đã hủy", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(order.Status, "Đã hủy", StringComparison.OrdinalIgnoreCase))
             {
                 var auth = await AuthStateProvider.GetAuthenticationStateAsync();
                 var user = auth.User;
-                var who = user?.Identity?.IsAuthenticated == true ? (user.Identity?.Name ?? "Unknown") : "Hệ thống";
+                var who = user?.Identity?.Name ?? "Hệ thống";
 
-                foreach (var detail in order.OrderDetails)
+                // Nhóm trạng thái "sớm" -> tự động tạo phiếu nhập nội bộ và cộng tồn ngay
+                var earlyStatuses = new[] { "Chờ xác nhận", "Chờ thanh toán", "Đã thanh toán" };
+                // Nhóm trạng thái "muộn" -> tạo phiếu thu hồi (ReturnReceipt), không cộng tồn
+                var lateStatuses = new[] { "Sẵn sàng giao hàng", "Đang giao", "Hoàn thành" };
+
+                var current = order.Status ?? string.Empty;
+
+                if (earlyStatuses.Contains(current))
                 {
-                    var product = await db.Products.FirstOrDefaultAsync(p => p.Id == detail.ProductId);
-                    if (product == null) continue;
-
-                    int oldQty = product.StockQuantity;
-                    product.StockQuantity += detail.Quantity;
-                    db.Products.Update(product);
-
-                    // thêm inventory log (OldQuantity + QuantityChange + NewQuantity)
-                    var log = new InventoryLog
+                    // Tìm hoặc tạo supplier nội bộ để gắn phiếu nhập
+                    string internalSupplierName = "Nội bộ (Thu hồi tự động)";
+                    var supplier = await db.Suppliers.FirstOrDefaultAsync(s => s.Name == internalSupplierName);
+                    if (supplier == null)
                     {
-                        ProductId = product.Id,
-                        OldQuantity = oldQty,
-                        QuantityChange = detail.Quantity,
-                        NewQuantity = product.StockQuantity,
-                        Reason = $"Trả hàng do hủy đơn #{order.Id} (hủy bởi {who})",
-                        Timestamp = DateTime.UtcNow
+                        supplier = new Supplier
+                        {
+                            Name = internalSupplierName,
+                            ContactPerson = "Hệ thống"
+                        };
+                        await db.Suppliers.AddAsync(supplier);
+                        await db.SaveChangesAsync();
+                    }
+
+                    // Tạo PurchaseOrder và items
+                    var po = new PurchaseOrder
+                    {
+                        SupplierId = supplier.Id,
+                        OrderDate = DateTime.UtcNow,
+                        Status = "Đã nhận hàng", // Vì ta sẽ nhập kho ngay
+                        ExpectedDeliveryDate = null
                     };
-                    await db.InventoryLogs.AddAsync(log);
+
+                    foreach (var detail in order.OrderDetails)
+                    {
+                        var poi = new PurchaseOrderItem
+                        {
+                            ProductId = detail.ProductId,
+                            Quantity = detail.Quantity,
+                            ReceivedQuantity = detail.Quantity,
+                            UnitPrice = detail.Price
+                        };
+                        po.Items.Add(poi);
+                    }
+
+                    await db.PurchaseOrders.AddAsync(po);
+                    await db.SaveChangesAsync();
+
+                    // Sinh mã phiếu nhập giống logic hiện có
+                    po.PurchaseOrderNumber = $"PN-{po.Id:D5}";
+                    db.PurchaseOrders.Update(po);
+                    await db.SaveChangesAsync();
+
+                    // Cập nhật tồn ngay theo các item và tạo InventoryLog
+                    foreach (var item in po.Items)
+                    {
+                        var product = await db.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId);
+                        if (product == null) continue;
+
+                        int oldQty = product.StockQuantity;
+                        product.StockQuantity += item.ReceivedQuantity;
+                        db.Products.Update(product);
+
+                        var log = new InventoryLog
+                        {
+                            ProductId = product.Id,
+                            OldQuantity = oldQty,
+                            QuantityChange = item.ReceivedQuantity,
+                            NewQuantity = product.StockQuantity,
+                            Reason = $"Trả hàng do hủy đơn #{order.Id} (tự động, bởi {who})",
+                            Timestamp = DateTime.UtcNow
+                        };
+                        await db.InventoryLogs.AddAsync(log);
+                    }
+
+                    // Cập nhật trạng thái đơn
+                    order.Status = newStatus;
+                    if (!string.IsNullOrWhiteSpace(salesNoteInput))
+                        order.SalesNotes = salesNoteInput;
+
+                    db.Orders.Update(order);
+                    await db.SaveChangesAsync();
+                    await tx.CommitAsync();
+
+                    ToastSvc.ShowToast("Đã hủy đơn, tạo phiếu nhập nội bộ và cộng tồn thành công.", ToastLevel.Success);
+                    await LoadCurrentOrderAsync();
+                    StateHasChanged();
+                    return;
+                }
+                else if (lateStatuses.Contains(current))
+                {
+                    // Trạng thái muộn: tạo ReturnReceipt tự động (phiếu thu hồi), KHÔNG trả tồn
+                    // Tránh tạo trùng nếu đã có phiếu chưa nhận cho order này
+                    var existing = await db.ReturnReceipts
+                                           .FirstOrDefaultAsync(rr => rr.RelatedOrderId == order.Id && rr.Status != "Đã nhận hàng");
+                    if (existing != null)
+                    {
+                        // Cập nhật trạng thái order = Đã hủy, commit, redirect tới phiếu tồn tại
+                        order.Status = newStatus;
+                        if (!string.IsNullOrWhiteSpace(salesNoteInput))
+                            order.SalesNotes = salesNoteInput;
+                        db.Orders.Update(order);
+                        await db.SaveChangesAsync();
+                        await tx.CommitAsync();
+
+                        ToastSvc.ShowToast($"Đã hủy đơn. Phiếu thu hồi đã tồn tại: {existing.ReturnReceiptNumber}.", ToastLevel.Info);
+                        Navigation.NavigateTo($"/admin/return-receipts/{existing.Id}");
+                        return;
+                    }
+
+                    var rr = new ReturnReceipt
+                    {
+                        RelatedOrderId = order.Id,
+                        CreatedAt = DateTime.UtcNow,
+                        Status = "Đã đặt hàng",
+                        CreatedBy = who
+                    };
+
+                    foreach (var detail in order.OrderDetails)
+                    {
+                        var item = new ReturnReceiptItem
+                        {
+                            ProductId = detail.ProductId,
+                            Quantity = detail.Quantity,
+                            ReceivedQuantity = detail.Quantity, // default = order qty; kho có thể chỉnh
+                            UnitPrice = detail.Price
+                        };
+                        rr.Items.Add(item);
+                    }
+
+                    await db.ReturnReceipts.AddAsync(rr);
+                    await db.SaveChangesAsync();
+
+                    // Sinh mã phiếu thu hồi
+                    rr.ReturnReceiptNumber = $"PH-{rr.Id:D5}";
+                    db.ReturnReceipts.Update(rr);
+
+                    // Cập nhật trạng thái đơn = Đã hủy
+                    order.Status = newStatus;
+                    if (!string.IsNullOrWhiteSpace(salesNoteInput))
+                        order.SalesNotes = salesNoteInput;
+
+                    db.Orders.Update(order);
+                    await db.SaveChangesAsync();
+                    await tx.CommitAsync();
+
+                    ToastSvc.ShowToast($"Đã tự động tạo phiếu thu hồi #{rr.ReturnReceiptNumber}. Vui lòng kiểm tra và xác nhận ở giao diện Phiếu thu hồi.", ToastLevel.Info);
+                    Navigation.NavigateTo($"/admin/return-receipts/{rr.Id}");
+                    return;
+                }
+                else
+                {
+                    // Fallback: nếu trạng thái không nằm trong 2 nhóm trên -> trả tồn (an toàn)
+                    foreach (var detail in order.OrderDetails)
+                    {
+                        var product = await db.Products.FirstOrDefaultAsync(p => p.Id == detail.ProductId);
+                        if (product == null) continue;
+
+                        int oldQty = product.StockQuantity;
+                        product.StockQuantity += detail.Quantity;
+                        db.Products.Update(product);
+
+                        var log = new InventoryLog
+                        {
+                            ProductId = product.Id,
+                            OldQuantity = oldQty,
+                            QuantityChange = detail.Quantity,
+                            NewQuantity = product.StockQuantity,
+                            Reason = $"Trả hàng do hủy đơn #{order.Id} (hủy bởi {who})",
+                            Timestamp = DateTime.UtcNow
+                        };
+                        await db.InventoryLogs.AddAsync(log);
+                    }
+
+                    order.Status = newStatus;
+                    if (!string.IsNullOrWhiteSpace(salesNoteInput))
+                        order.SalesNotes = salesNoteInput;
+
+                    db.Orders.Update(order);
+                    await db.SaveChangesAsync();
+                    await tx.CommitAsync();
+
+                    ToastSvc.ShowToast("Đã hủy đơn và trả tồn tự động (fallback).", ToastLevel.Info);
+                    await LoadCurrentOrderAsync();
+                    StateHasChanged();
+                    return;
                 }
             }
 
-            // cập nhật trạng thái và sales notes
+            // Nếu không phải hủy, xử lý bình thường (ví dụ chuyển sang Hoàn thành)
             order.Status = newStatus;
             if (!string.IsNullOrWhiteSpace(salesNoteInput))
                 order.SalesNotes = salesNoteInput;
 
-            // Nếu hoàn thành -> set DeliveredDate trên shipment nếu có
             if (string.Equals(newStatus, "Hoàn thành", StringComparison.OrdinalIgnoreCase) && order.Shipment != null)
             {
                 var shipment = await db.Shipments.FirstOrDefaultAsync(s => s.Id == order.Shipment.Id);
@@ -335,15 +499,14 @@ else
 
             ToastSvc.ShowToast("Cập nhật trạng thái thành công.", ToastLevel.Success);
 
-            // Reload order để UI cập nhật liền (sử dụng context mới)
             await LoadCurrentOrderAsync();
             StateHasChanged();
         }
         catch (Exception ex)
         {
-            try { await tx.RollbackAsync(); } catch { }
-            Console.WriteLine("[OrderDetails] UpdateStatus exception: " + ex);
-            ToastSvc.ShowToast("Có lỗi khi cập nhật trạng thái. Vui lòng thử lại.", ToastLevel.Error);
+            await tx.RollbackAsync();
+            Console.WriteLine("[UpdateStatus ERROR] " + ex);
+            ToastSvc.ShowToast("Có lỗi xảy ra.", ToastLevel.Error);
         }
     }
 
@@ -365,17 +528,11 @@ else
         await JSRuntime.InvokeVoidAsync("triggerPrint");
     }
 
-    // Helper để lấy nội dung ngày giao an toàn
     private string GetDeliveredDateText(Shipment? shipment)
     {
         if (shipment == null) return "(chưa giao)";
-        var prop = shipment.GetType().GetProperty("DeliveredDate");
-        if (prop != null)
-        {
-            var val = prop.GetValue(shipment);
-            if (val is DateTime dt) return dt.ToLocalTime().ToString("g");
-            if (val is DateTime?) { var ndt = (DateTime?)val; if (ndt.HasValue) return ndt.Value.ToLocalTime().ToString("g"); }
-        }
+        if (shipment.DeliveredDate.HasValue)
+            return shipment.DeliveredDate.Value.ToLocalTime().ToString("g");
         return "(chưa giao)";
     }
 }

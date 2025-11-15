@@ -3,8 +3,15 @@
 @using Microsoft.EntityFrameworkCore
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
-<h3>Bảng điều khiển Logistics</h3>
+<h3 class="mb-3">
+    <button class="btn btn-outline-secondary btn-sm me-3" @onclick="GoBack" title="Quay lại" aria-label="Quay lại">
+        <i class="bi bi-arrow-left"></i>
+        <span class="d-none d-sm-inline ms-1">Quay lại</span>
+    </button>
+    Bảng điều khiển Logistics
+</h3>
 
 <div class="row">
     <div class="col-md-6">
@@ -146,6 +153,31 @@
             ordersToDeliver = new List<Order>();
             inProgress = new List<Order>();
             shippedOrderMap = new Dictionary<int,int>();
+        }
+    }
+
+    private async Task GoBack()
+    {
+        try
+        {
+            var handled = false;
+            try
+            {
+                handled = await JS.InvokeAsync<bool>("appHelpers.goBackIfPossible");
+            }
+            catch
+            {
+                handled = false;
+            }
+
+            if (!handled)
+            {
+                Navigation.NavigateTo("/admin");
+            }
+        }
+        catch
+        {
+            Navigation.NavigateTo("/admin");
         }
     }
 }

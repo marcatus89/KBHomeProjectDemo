@@ -22,6 +22,9 @@ namespace DoAnTotNghiep.Data
         public DbSet<InventoryLog> InventoryLogs { get; set; }
         public DbSet<InventoryAdjustmentRequest> InventoryAdjustmentRequests { get; set; }
 
+        // ReturnReceipt entities
+        public DbSet<ReturnReceipt> ReturnReceipts { get; set; }
+        public DbSet<ReturnReceiptItem> ReturnReceiptItems { get; set; }
 
         protected override void OnModelCreating(ModelBuilder builder)
         {
@@ -29,10 +32,13 @@ namespace DoAnTotNghiep.Data
             base.OnModelCreating(builder);
 
             // ---------- Decimal precision ----------
+            // Đặt precision cho các cột decimal để tránh cảnh báo & mất dữ liệu
             builder.Entity<Order>().Property(o => o.TotalAmount).HasPrecision(18, 2);
             builder.Entity<OrderDetail>().Property(od => od.Price).HasPrecision(18, 2);
             builder.Entity<Product>().Property(p => p.Price).HasPrecision(18, 2);
             builder.Entity<PurchaseOrderItem>().Property(pi => pi.UnitPrice).HasPrecision(18, 2);
+            // Thêm cấu hình cho ReturnReceiptItem.UnitPrice
+            builder.Entity<ReturnReceiptItem>().Property(rri => rri.UnitPrice).HasPrecision(18, 2);
 
             // ---------- Identity column sizing ----------
             // Các cấu hình này đảm bảo EF dùng nvarchar(450) cho các Id/khóa
@@ -80,7 +86,7 @@ namespace DoAnTotNghiep.Data
                 b.Property(uc => uc.UserId).HasMaxLength(450);
             });
 
-            // Bạn có thể thêm các cấu hình khác tại đây
+            // Nếu cần thêm cấu hình khác cho các bảng mới, thêm ở đây.
         }
     }
 }
