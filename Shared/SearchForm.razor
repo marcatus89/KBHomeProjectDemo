@@ -20,7 +20,7 @@
     {
         if (!string.IsNullOrWhiteSpace(searchTerm))
         {
-            Navigation.NavigateTo($"tim-kiem?query={Uri.EscapeDataString(searchTerm)}");
+            Navigation.NavigateTo(uri: $"tim-kiem?query={Uri.EscapeDataString(searchTerm)}");
         }
     }
 }

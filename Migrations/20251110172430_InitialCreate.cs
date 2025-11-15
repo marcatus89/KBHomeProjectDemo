@@ -64,6 +64,31 @@ namespace DoAnTotNghiep.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "InventoryAdjustmentRequests",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    ProductId = table.Column<int>(type: "int", nullable: false),
+                    ProductName = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    OldQuantity = table.Column<int>(type: "int", nullable: false),
+                    RequestedQuantity = table.Column<int>(type: "int", nullable: false),
+                    Status = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    RequestedByUserId = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    RequestedByEmail = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    RequestedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    ReviewedByUserId = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    ReviewedByEmail = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    ReviewedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    ReviewComment = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    RequestReason = table.Column<string>(type: "nvarchar(max)", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_InventoryAdjustmentRequests", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "Suppliers",
                 columns: table => new
                 {
@@ -220,8 +245,10 @@ namespace DoAnTotNghiep.Migrations
                     Price = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: false),
                     ImageUrl = table.Column<string>(type: "nvarchar(max)", nullable: true),
                     CategoryId = table.Column<int>(type: "int", nullable: false),
+                    Description = table.Column<string>(type: "nvarchar(2000)", maxLength: 2000, nullable: true),
                     StockQuantity = table.Column<int>(type: "int", nullable: false),
-                    IsVisible = table.Column<bool>(type: "bit", nullable: false)
+                    IsVisible = table.Column<bool>(type: "bit", nullable: false),
+                    RowVersion = table.Column<byte[]>(type: "rowversion", rowVersion: true, nullable: true)
                 },
                 constraints: table =>
                 {
@@ -244,7 +271,10 @@ namespace DoAnTotNghiep.Migrations
                     SupplierId = table.Column<int>(type: "int", nullable: false),
                     OrderDate = table.Column<DateTime>(type: "datetime2", nullable: false),
                     ExpectedDeliveryDate = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    Status = table.Column<string>(type: "nvarchar(max)", nullable: false)
+                    Status = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                    RejectionReason = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    RejectedByEmail = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    RejectedAt = table.Column<DateTime>(type: "datetime2", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -310,6 +340,7 @@ namespace DoAnTotNghiep.Migrations
                     Id = table.Column<int>(type: "int", nullable: false)
                         .Annotation("SqlServer:Identity", "1, 1"),
                     ProductId = table.Column<int>(type: "int", nullable: false),
+                    OldQuantity = table.Column<int>(type: "int", nullable: false),
                     QuantityChange = table.Column<int>(type: "int", nullable: false),
                     NewQuantity = table.Column<int>(type: "int", nullable: false),
                     Reason = table.Column<string>(type: "nvarchar(max)", nullable: false),
@@ -335,6 +366,7 @@ namespace DoAnTotNghiep.Migrations
                     PurchaseOrderId = table.Column<int>(type: "int", nullable: false),
                     ProductId = table.Column<int>(type: "int", nullable: false),
                     Quantity = table.Column<int>(type: "int", nullable: false),
+                    ReceivedQuantity = table.Column<int>(type: "int", nullable: false),
                     UnitPrice = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: false)
                 },
                 constraints: table =>
@@ -452,6 +484,9 @@ namespace DoAnTotNghiep.Migrations
 
             migrationBuilder.DropTable(
                 name: "AspNetUserTokens");
+
+            migrationBuilder.DropTable(
+                name: "InventoryAdjustmentRequests");
 
             migrationBuilder.DropTable(
                 name: "InventoryLogs");
