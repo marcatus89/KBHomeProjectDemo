@@ -1,0 +1,151 @@
+@page "/ticket/create"
+@using DoAnTotNghiep.Models
+@using DoAnTotNghiep.Services
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Components.Authorization
+@inject TicketService TicketService
+@inject UserManager<IdentityUser> UserManager
+@inject NavigationManager NavigationManager
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject ToastService ToastService
+
+<AuthorizeView>
+    <Authorized Context="authState">
+        <h3>Tạo Yêu cầu Hỗ trợ Mới</h3>
+
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="alert alert-danger">@errorMessage</div>
+        }
+
+        @if (categories == null)
+        {
+            <p><em>Đang tải dữ liệu...</em></p>
+        }
+        else if (!categories.Any())
+        {
+            <div class="alert alert-warning">
+                Hệ thống hiện chưa có danh mục hỗ trợ nào.
+            </div>
+        }
+        else
+        {
+            <EditForm Model="@newTicket" OnValidSubmit="HandleValidSubmit">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+
+                <div class="form-group mb-3">
+                    <label for="title" class="form-label">Tiêu đề</label>
+                    <InputText id="title" class="form-control" @bind-Value="newTicket.Title" />
+                    <ValidationMessage For="@(() => newTicket.Title)" />
+                </div>
+
+                <div class="form-group mb-3">
+                    <label for="description" class="form-label">Mô tả chi tiết</label>
+                    <InputTextArea id="description" class="form-control" rows="5" @bind-Value="newTicket.Description" />
+                    <ValidationMessage For="@(() => newTicket.Description)" />
+                </div>
+
+                <div class="form-group mb-3">
+                    <label for="category" class="form-label">Danh mục</label>
+                    <InputSelect id="category" class="form-select" @bind-Value="newTicket.TicketCategoryId">
+                        @foreach (var category in categories)
+                        {
+                            <option value="@category.Id">@category.Name</option>
+                        }
+                    </InputSelect>
+                </div>
+
+                <div class="form-group mb-3">
+                    <label for="priority" class="form-label">Mức độ ưu tiên</label>
+                    <InputSelect id="priority" class="form-select" @bind-Value="newTicket.Priority">
+                        @foreach (TicketPriority p in Enum.GetValues(typeof(TicketPriority)))
+                        {
+                            <option value="@p">@p</option>
+                        }
+                    </InputSelect>
+                </div>
+
+                <button type="submit" class="btn btn-primary" disabled="@isSubmitting">
+                    @if (isSubmitting)
+                    {
+                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                        <span> Đang gửi...</span>
+                    }
+                    else
+                    {
+                        <span>Gửi Yêu cầu</span>
+                    }
+                </button>
+            </EditForm>
+        }
+    </Authorized>
+    <NotAuthorized>
+        <p>Bạn phải đăng nhập để tạo yêu cầu hỗ trợ.</p>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    private Ticket newTicket = new Ticket();
+    private List<TicketCategory> categories;
+    private bool isSubmitting = false;
+    private string errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            categories = await TicketService.GetTicketCategoriesAsync();
+            if (categories != null && categories.Any())
+            {
+                // set default category & default priority nếu chưa có
+                newTicket.TicketCategoryId = categories.First().Id;
+                newTicket.Priority = TicketPriority.Normal;
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "Không thể tải danh mục. Vui lòng thử lại sau.";
+            Console.WriteLine($"Lỗi khi tải categories: {ex}");
+        }
+    }
+
+    private async Task HandleValidSubmit()
+    {
+        isSubmitting = true;
+        errorMessage = null;
+
+        try
+        {
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            var identityUser = await UserManager.GetUserAsync(user);
+
+            if (identityUser == null)
+            {
+                errorMessage = "Không thể xác thực người dùng. Vui lòng đăng nhập lại.";
+                return;
+            }
+
+            newTicket.RequesterId = identityUser.Id;
+            // Optionally set CreatedAt/LastUpdatedAt here or let TicketService set them
+            await TicketService.CreateTicketAsync(newTicket);
+
+            ToastService?.ShowToast("Tạo yêu cầu thành công.", ToastLevel.Success);
+
+            // Điều hướng về danh sách ticket (hoặc trang chi tiết nếu muốn)
+            NavigationManager.NavigateTo("/tickets");
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "Đã có lỗi xảy ra khi gửi yêu cầu. Vui lòng thử lại.";
+            Console.WriteLine($"Lỗi khi tạo ticket: {ex}");
+        }
+        finally
+        {
+            // Nếu đã điều hướng thành công thì không cần set false, nhưng nếu ở lại trang thì reset
+            isSubmitting = false;
+        }
+    }
+}

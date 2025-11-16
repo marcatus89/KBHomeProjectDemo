@@ -21,6 +21,11 @@ namespace DoAnTotNghiep.Data
         public DbSet<Shipment> Shipments { get; set; }
         public DbSet<InventoryLog> InventoryLogs { get; set; }
         public DbSet<InventoryAdjustmentRequest> InventoryAdjustmentRequests { get; set; }
+        public DbSet<Ticket> Tickets { get; set; }
+        public DbSet<TicketCategory> TicketCategories { get; set; }
+        public DbSet<TicketComment> TicketComments { get; set; }
+        public DbSet<TicketAttachment> TicketAttachments { get; set; }
+        public DbSet<TicketWatcher> TicketWatchers { get; set; }
 
         // ReturnReceipt entities
         public DbSet<ReturnReceipt> ReturnReceipts { get; set; }
@@ -39,6 +44,7 @@ namespace DoAnTotNghiep.Data
             builder.Entity<PurchaseOrderItem>().Property(pi => pi.UnitPrice).HasPrecision(18, 2);
             // Thêm cấu hình cho ReturnReceiptItem.UnitPrice
             builder.Entity<ReturnReceiptItem>().Property(rri => rri.UnitPrice).HasPrecision(18, 2);
+
 
             // ---------- Identity column sizing ----------
             // Các cấu hình này đảm bảo EF dùng nvarchar(450) cho các Id/khóa
@@ -86,7 +92,42 @@ namespace DoAnTotNghiep.Data
                 b.Property(uc => uc.UserId).HasMaxLength(450);
             });
 
-            // Nếu cần thêm cấu hình khác cho các bảng mới, thêm ở đây.
+            builder.Entity<Ticket>()
+                .HasOne(t => t.Requester)
+                .WithMany()
+                .HasForeignKey(t => t.RequesterId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<Ticket>()
+                .HasOne(t => t.Assignee)
+                .WithMany()
+                .HasForeignKey(t => t.AssigneeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<Ticket>()
+                .HasOne(t => t.TicketCategory)
+                .WithMany(c => c.Tickets)
+                .HasForeignKey(t => t.TicketCategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // TicketComment -> Ticket (cascade delete comment nếu delete ticket)
+            builder.Entity<TicketComment>()
+                .HasOne(tc => tc.Ticket)
+                .WithMany(t => t.Comments)
+                .HasForeignKey(tc => tc.TicketId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            builder.Entity<TicketComment>()
+                .HasOne(tc => tc.Author)
+                .WithMany()
+                .HasForeignKey(tc => tc.AuthorId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<TicketWatcher>()
+                .HasOne(tw => tw.Ticket)
+                .WithMany(t => t.Watchers)
+                .HasForeignKey(tw => tw.TicketId)
+                .OnDelete(DeleteBehavior.Restrict);
         }
     }
 }

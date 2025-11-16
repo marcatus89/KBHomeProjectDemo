@@ -21,8 +21,17 @@ else if (purchaseOrder == null)
 }
 else
 {
-    <div id="printable-area" class="printable-container">
-        <h2 class="text-center">PHIẾU NHẬP KHO</h2>
+     <div id="printable-area" class="printable-container mb-4">
+        <div class="invoice-header d-flex align-items-center mb-4">
+            <img src="/images/logo.png" class="invoice-logo me-4" alt="Company Logo" />
+            <div class="company-details">
+                <strong>Công ty TNHH KBHOME VIETNAM</strong><br />
+                Showroom HCM 46 Song Hành, Phường Bình Trưng, Thành Phố Hồ Chí Minh.<br />
+                Hotline: +84 93 189 48 68
+            </div>
+        </div>
+
+        <h2 class="text-center mt-4">PHÍẾU NHẬP KHO</h2>
         <p class="text-center"><strong>Số phiếu:</strong> @purchaseOrder.PurchaseOrderNumber</p>
         <hr />
         <p><strong>Nhà cung cấp:</strong> @purchaseOrder.Supplier?.Name</p>
@@ -68,13 +77,13 @@ else
             </tfoot>
         </table>
 
-        <div class="signature-section">
-            <div class="signature-box">
-                <p><strong>Người lập phiếu</strong></p>
+         <div class="signature-section mt-4 d-flex justify-content-between">
+            <div class="signature-box text-center">
+                <p><strong>Bên Giao</strong></p>
                 <p>(Ký, họ tên)</p>
             </div>
-            <div class="signature-box">
-                <p><strong>Thủ kho</strong></p>
+            <div class="signature-box text-center">
+                <p><strong>Bên Nhận</strong></p>
                 <p>(Ký, họ tên)</p>
             </div>
         </div>

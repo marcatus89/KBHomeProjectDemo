@@ -1,0 +1,247 @@
+@page "/admin/ticket-categories"
+@attribute [Authorize(Roles = "Admin")]
+@using DoAnTotNghiep.Data
+@using DoAnTotNghiep.Models
+@using DoAnTotNghiep.Services
+@using Microsoft.EntityFrameworkCore  @* <-- Dòng quan trọng để sửa lỗi 'AnyAsync' *@
+@using Microsoft.AspNetCore.Components.Forms
+@using System.Text
+@using System.Globalization
+@using System.Text.RegularExpressions
+@inject ApplicationDbContext DbContext
+@inject ToastService ToastService
+@inject IJSRuntime JS
+
+<h3>Quản lý Danh mục Sự vụ</h3>
+
+<div class="card">
+    <div class="card-body">
+        <EditForm Model="@newCategory" OnValidSubmit="HandleAddCategory">
+            <DataAnnotationsValidator />
+            <div class="input-group">
+                <InputText @bind-Value="newCategory.Name" class="form-control" placeholder="Tên danh mục mới..." />
+                <button type="submit" class="btn btn-primary" disabled="@isSubmitting">
+                    @if (isSubmitting)
+                    {
+                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                        <span class="ms-1">Đang thêm...</span>
+                    }
+                    else
+                    {
+                        <span>Thêm mới</span>
+                    }
+                </button>
+            </div>
+            <ValidationMessage For="@(() => newCategory.Name)" />
+        </EditForm>
+    </div>
+</div>
+
+@if (categories == null)
+{
+    <p class="mt-3"><em>Đang tải danh mục...</em></p>
+}
+else
+{
+    <table class="table table-striped mt-3">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Tên Danh mục</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var category in categories)
+            {
+                <tr>
+                    <td>@category.Id</td>
+                    <td>@category.Name</td>
+                    <td class="text-end">
+                        <button class="btn btn-danger btn-sm" @onclick="() => ConfirmDeleteCategory(category.Id)">Xóa</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<TicketCategory> categories;
+    private TicketCategory newCategory = new TicketCategory();
+    private bool isSubmitting = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCategories();
+    }
+
+    private async Task LoadCategories()
+    {
+        categories = await DbContext.TicketCategories
+            .OrderBy(c => c.Name)
+            .ToListAsync();
+    }
+
+    private async Task HandleAddCategory()
+    {
+        if (isSubmitting) return;
+
+        var rawName = newCategory.Name?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(rawName))
+        {
+            ToastService.ShowToast("Vui lòng nhập tên danh mục.", ToastLevel.Warning);
+            return;
+        }
+
+        isSubmitting = true;
+
+        try
+        {
+            // Chuẩn hóa nhập của user để so sánh (bất chấp dấu / hoa-thường / nhiều khoảng trắng)
+            var normInput = NormalizeForComparison(rawName);
+
+            // Lấy tất cả tên danh mục từ DB (AsNoTracking cho nhanh)
+            var existingNames = await DbContext.TicketCategories
+                .AsNoTracking()
+                .Select(c => c.Name)
+                .ToListAsync();
+
+            // So sánh trong bộ nhớ bằng chuỗi đã chuẩn hóa
+            var exists = existingNames.Any(n => NormalizeForComparison(n) == normInput);
+
+            if (exists)
+            {
+                ToastService.ShowToast($"Danh mục '{rawName}' đã tồn tại (bao gồm trường hợp không dấu).", ToastLevel.Warning);
+                return;
+            }
+
+            var category = new TicketCategory
+            {
+                Name = rawName
+            };
+
+            DbContext.TicketCategories.Add(category);
+            await DbContext.SaveChangesAsync();
+
+            ToastService.ShowToast("Đã thêm danh mục mới thành công!", ToastLevel.Success);
+            newCategory = new TicketCategory();
+            await LoadCategories();
+            StateHasChanged();
+        }
+        catch (DbUpdateException dbEx)
+        {
+            Console.WriteLine($"[TicketCategory] DbUpdateException: {dbEx}");
+            ToastService.ShowToast("Lỗi khi lưu dữ liệu. Vui lòng thử lại.", ToastLevel.Error);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[TicketCategory] Exception: {ex}");
+            ToastService.ShowToast("Đã xảy ra lỗi. Vui lòng thử lại.", ToastLevel.Error);
+        }
+        finally
+        {
+            isSubmitting = false;
+        }
+    }
+
+    private async Task ConfirmDeleteCategory(int categoryId)
+    {
+        // Kiểm tra tồn tại ticket liên quan trước
+        var isUsed = await DbContext.Tickets.AnyAsync(t => t.TicketCategoryId == categoryId);
+        if (isUsed)
+        {
+            ToastService.ShowToast("Không thể xóa danh mục đang được sử dụng bởi các ticket.", ToastLevel.Error);
+            return;
+        }
+
+        bool ok = false;
+        try
+        {
+            ok = await JS.InvokeAsync<bool>("confirm", "Bạn có chắc chắn muốn xóa danh mục này? Thao tác không thể hoàn tác.");
+        }
+        catch
+        {
+            ok = false;
+        }
+
+        if (!ok) return;
+
+        await DeleteCategory(categoryId);
+    }
+
+    private async Task DeleteCategory(int categoryId)
+    {
+        try
+        {
+            var category = await DbContext.TicketCategories.FindAsync(categoryId);
+            if (category == null)
+            {
+                ToastService.ShowToast("Danh mục không tồn tại hoặc đã được xóa.", ToastLevel.Warning);
+                return;
+            }
+
+            // Double-check again (an toàn) trước khi xóa
+            var isUsed = await DbContext.Tickets.AnyAsync(t => t.TicketCategoryId == categoryId);
+            if (isUsed)
+            {
+                ToastService.ShowToast("Không thể xóa danh mục đang được sử dụng bởi các ticket.", ToastLevel.Error);
+                return;
+            }
+
+            DbContext.TicketCategories.Remove(category);
+            await DbContext.SaveChangesAsync();
+
+            ToastService.ShowToast("Đã xóa danh mục.", ToastLevel.Success);
+            await LoadCategories();
+            StateHasChanged();
+        }
+        catch (DbUpdateException dbEx)
+        {
+            Console.WriteLine($"[TicketCategory] Delete DbUpdateException: {dbEx}");
+            ToastService.ShowToast("Lỗi khi xóa danh mục. Vui lòng thử lại.", ToastLevel.Error);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[TicketCategory] Delete Exception: {ex}");
+            ToastService.ShowToast("Đã xảy ra lỗi. Vui lòng thử lại.", ToastLevel.Error);
+        }
+    }
+
+    // ----------------- Helper normalize -----------------
+    // Convert string to normalized form for comparison:
+    // - remove diacritics (accent marks)
+    // - replace đ/Đ -> d
+    // - collapse whitespace, trim
+    // - lower-case
+    private static string NormalizeForComparison(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+            return string.Empty;
+
+        // 1) Normalize to FormD to separate base letters and combining marks
+        var normalized = input.Normalize(NormalizationForm.FormD);
+
+        // 2) Remove combining diacritical marks
+        var sb = new StringBuilder();
+        foreach (var ch in normalized)
+        {
+            var uc = CharUnicodeInfo.GetUnicodeCategory(ch);
+            if (uc != UnicodeCategory.NonSpacingMark && uc != UnicodeCategory.SpacingCombiningMark && uc != UnicodeCategory.EnclosingMark)
+            {
+                sb.Append(ch);
+            }
+        }
+
+        var noDiacritics = sb.ToString().Normalize(NormalizationForm.FormC);
+
+        // 3) Replace special Vietnamese characters 'đ'/'Đ' with 'd'/'D'
+        noDiacritics = noDiacritics.Replace('đ', 'd').Replace('Đ', 'D');
+
+        // 4) Trim and collapse multiple spaces to single space
+        var collapsed = Regex.Replace(noDiacritics.Trim(), @"\s+", " ");
+
+        // 5) Lowercase for case-insensitive comparison
+        return collapsed.ToLowerInvariant();
+    }
+}

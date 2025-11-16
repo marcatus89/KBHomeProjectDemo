@@ -1,0 +1,195 @@
+@page "/tickets"
+@using DoAnTotNghiep.Models
+@using DoAnTotNghiep.Services
+@using Microsoft.AspNetCore.Identity
+@using System.Security.Claims
+@using Microsoft.EntityFrameworkCore
+@inject TicketService TicketService
+@inject IDbContextFactory<ApplicationDbContext> ContextFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+
+<style>
+    /* Table layout helpers for ticket list */
+    .table-ticket th, .table-ticket td { vertical-align: middle; }
+    .text-truncate-ellipsis {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        display: block;
+    }
+    /* On very small screens allow title to wrap a bit (optional) */
+    @@media (max-width: 576px) {
+        .text-truncate-ellipsis {
+            white-space: normal;
+            display: -webkit-box;
+            -webkit-line-clamp: 2; /* show up to 2 lines */
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+    }
+    /* Make action buttons smaller and stack on narrow screens */
+    .ticket-actions { min-width: 110px; }
+    @@media (max-width: 576px) {
+        .ticket-actions .btn { display:block; width:100%; margin-bottom:6px; }
+    }
+</style>
+
+<h3 class="fw-bold text-primary mb-3">
+    <i class="bi bi-ticket-detailed"></i> Ticket của tôi
+</h3>
+
+<AuthorizeView>
+    <Authorized>
+        <a href="/ticket/create" class="btn btn-success mb-3">
+            <i class="bi bi-plus-circle"></i> Tạo Ticket mới
+        </a>
+
+        @if (isLoading)
+        {
+            <p><em>Đang tải dữ liệu...</em></p>
+        }
+        else if (userTickets == null || !userTickets.Any())
+        {
+            <p>Bạn chưa có ticket nào.</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover align-middle table-ticket">
+                    <!-- Colgroup để phân bố kích thước cột -->
+                    <colgroup>
+                        <col style="width:48px" />      <!-- marker -->
+                        <col style="width:68px" />      <!-- ID -->
+                        <col />                         <!-- Title (flex) -->
+                        <col style="width:140px" />     <!-- Category -->
+                        <col style="width:140px" />     <!-- Requester -->
+                        <col style="width:140px" />     <!-- Assignee -->
+                        <col style="width:110px" />     <!-- Status -->
+                        <col style="width:150px" />     <!-- Updated -->
+                        <col style="width:120px" />     <!-- Actions -->
+                    </colgroup>
+
+                    <thead class="table-light">
+                        <tr>
+                            <th></th>
+                            <th>ID</th>
+                            <th>Tiêu đề</th>
+                            <th>Danh mục</th>
+                            <th>Requester</th>
+                            <th>Assignee</th>
+                            <th>Trạng thái</th>
+                            <th>Cập nhật</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var t in userTickets)
+                        {
+                            <tr class="@( (!t.IsRead) ? "table-warning" : "" )">
+                                <td>
+                                    @if (!t.IsRead)
+                                    {
+                                        <span class="text-primary fw-bold" title="Chưa đọc">🔵</span>
+                                    }
+                                </td>
+
+                                <td class="align-middle">@t.Id</td>
+
+                                <td>
+                                    <div class="text-truncate-ellipsis" title="@t.Title">
+                                        @t.Title
+                                    </div>
+                                </td>
+
+                                <td>
+                                    <div class="text-truncate-ellipsis" title="@t.TicketCategory?.Name">
+                                        @t.TicketCategory?.Name
+                                    </div>
+                                </td>
+
+                                <td>
+                                    <div class="text-truncate-ellipsis" title="@t.Requester?.UserName">
+                                        @t.Requester?.UserName
+                                    </div>
+                                </td>
+
+                                <td>
+                                    <div class="text-truncate-ellipsis" title="@(t.Assignee?.UserName ?? "Unassigned")">
+                                        @(t.Assignee?.UserName ?? "Unassigned")
+                                    </div>
+                                </td>
+
+                                <td>
+                                    <div>
+                                        <span class="badge @(t.Status == TicketStatus.Open ? "bg-warning text-dark" :
+                                                              t.Status == TicketStatus.InProgress ? "bg-info text-dark" :
+                                                              t.Status == TicketStatus.Resolved ? "bg-success" :
+                                                              t.Status == TicketStatus.Closed ? "bg-secondary" : "bg-light")">
+                                            @t.Status
+                                        </span>
+                                    </div>
+                                </td>
+
+                                <td style="white-space:nowrap;">
+                                    @t.LastUpdatedAt.ToString("g")
+                                </td>
+
+                                <td class="ticket-actions text-end">
+                                    <a href="@($"/ticket/{t.Id}")" class="btn btn-sm btn-outline-primary me-1" title="Xem chi tiết">
+                                        <i class="bi bi-eye"></i> Xem
+                                    </a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </Authorized>
+    <NotAuthorized>
+        <p>Vui lòng đăng nhập để xem tickets của bạn.</p>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    private List<Ticket> userTickets = new();
+    private bool isLoading = true;
+    private string? currentUserId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = auth.User;
+        currentUserId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(currentUserId))
+        {
+            isLoading = false;
+            return;
+        }
+
+        await using var db = await ContextFactory.CreateDbContextAsync();
+
+        var tickets = await db.Tickets
+            .Include(t => t.Requester)
+            .Include(t => t.Assignee)
+            .Include(t => t.TicketCategory)
+            .Where(t => t.RequesterId == currentUserId || t.AssigneeId == currentUserId ||
+                        db.TicketWatchers.Any(w => w.TicketId == t.Id && w.UserId == currentUserId))
+            .OrderByDescending(t => t.LastUpdatedAt)
+            .ToListAsync();
+
+        var unreadIds = await db.TicketWatchers
+            .Where(w => w.UserId == currentUserId && !w.IsRead)
+            .Select(w => w.TicketId)
+            .ToListAsync();
+
+        userTickets = tickets.Select(t =>
+        {
+            t.IsRead = !unreadIds.Contains(t.Id);
+            return t;
+        }).ToList();
+
+        isLoading = false;
+    }
+}

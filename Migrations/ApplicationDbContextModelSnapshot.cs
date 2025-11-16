@@ -452,6 +452,180 @@ namespace DoAnTotNghiep.Migrations
                     b.ToTable("Suppliers");
                 });
 
+            modelBuilder.Entity("DoAnTotNghiep.Models.Ticket", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AssigneeId")
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("LastUpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RequesterId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("TicketCategoryId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssigneeId");
+
+                    b.HasIndex("RequesterId");
+
+                    b.HasIndex("TicketCategoryId");
+
+                    b.ToTable("Tickets");
+                });
+
+            modelBuilder.Entity("DoAnTotNghiep.Models.TicketAttachment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("CommentId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("FilePath")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("TicketId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UploaderId")
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CommentId");
+
+                    b.HasIndex("TicketId");
+
+                    b.HasIndex("UploaderId");
+
+                    b.ToTable("TicketAttachments");
+                });
+
+            modelBuilder.Entity("DoAnTotNghiep.Models.TicketCategory", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("TicketCategories");
+                });
+
+            modelBuilder.Entity("DoAnTotNghiep.Models.TicketComment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AuthorId")
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsInternalNote")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("ReplyToCommentId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TicketId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorId");
+
+                    b.HasIndex("ReplyToCommentId");
+
+                    b.HasIndex("TicketId");
+
+                    b.ToTable("TicketComments");
+                });
+
+            modelBuilder.Entity("DoAnTotNghiep.Models.TicketWatcher", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("IsRead")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("TicketId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TicketId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("TicketWatchers");
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole", b =>
                 {
                     b.Property<string>("Id")
@@ -769,6 +943,97 @@ namespace DoAnTotNghiep.Migrations
                     b.Navigation("Order");
                 });
 
+            modelBuilder.Entity("DoAnTotNghiep.Models.Ticket", b =>
+                {
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", "Assignee")
+                        .WithMany()
+                        .HasForeignKey("AssigneeId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", "Requester")
+                        .WithMany()
+                        .HasForeignKey("RequesterId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("DoAnTotNghiep.Models.TicketCategory", "TicketCategory")
+                        .WithMany("Tickets")
+                        .HasForeignKey("TicketCategoryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Assignee");
+
+                    b.Navigation("Requester");
+
+                    b.Navigation("TicketCategory");
+                });
+
+            modelBuilder.Entity("DoAnTotNghiep.Models.TicketAttachment", b =>
+                {
+                    b.HasOne("DoAnTotNghiep.Models.TicketComment", "Comment")
+                        .WithMany("Attachments")
+                        .HasForeignKey("CommentId");
+
+                    b.HasOne("DoAnTotNghiep.Models.Ticket", "Ticket")
+                        .WithMany("Attachments")
+                        .HasForeignKey("TicketId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", "Uploader")
+                        .WithMany()
+                        .HasForeignKey("UploaderId");
+
+                    b.Navigation("Comment");
+
+                    b.Navigation("Ticket");
+
+                    b.Navigation("Uploader");
+                });
+
+            modelBuilder.Entity("DoAnTotNghiep.Models.TicketComment", b =>
+                {
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", "Author")
+                        .WithMany()
+                        .HasForeignKey("AuthorId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("DoAnTotNghiep.Models.TicketComment", "ReplyToComment")
+                        .WithMany("Replies")
+                        .HasForeignKey("ReplyToCommentId");
+
+                    b.HasOne("DoAnTotNghiep.Models.Ticket", "Ticket")
+                        .WithMany("Comments")
+                        .HasForeignKey("TicketId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Author");
+
+                    b.Navigation("ReplyToComment");
+
+                    b.Navigation("Ticket");
+                });
+
+            modelBuilder.Entity("DoAnTotNghiep.Models.TicketWatcher", b =>
+                {
+                    b.HasOne("DoAnTotNghiep.Models.Ticket", "Ticket")
+                        .WithMany("Watchers")
+                        .HasForeignKey("TicketId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Ticket");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>
                 {
                     b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole", null)
@@ -840,6 +1105,27 @@ namespace DoAnTotNghiep.Migrations
             modelBuilder.Entity("DoAnTotNghiep.Models.Supplier", b =>
                 {
                     b.Navigation("PurchaseOrders");
+                });
+
+            modelBuilder.Entity("DoAnTotNghiep.Models.Ticket", b =>
+                {
+                    b.Navigation("Attachments");
+
+                    b.Navigation("Comments");
+
+                    b.Navigation("Watchers");
+                });
+
+            modelBuilder.Entity("DoAnTotNghiep.Models.TicketCategory", b =>
+                {
+                    b.Navigation("Tickets");
+                });
+
+            modelBuilder.Entity("DoAnTotNghiep.Models.TicketComment", b =>
+                {
+                    b.Navigation("Attachments");
+
+                    b.Navigation("Replies");
                 });
 #pragma warning restore 612, 618
         }

@@ -1,0 +1,795 @@
+@page "/ticket/{Id:int}"
+@using DoAnTotNghiep.Models
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Forms
+@using System.Security.Claims
+@using System.IO
+@using System
+@using System.Net
+@using System.Text.RegularExpressions
+@using Microsoft.JSInterop
+
+@inject IDbContextFactory<ApplicationDbContext> ContextFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject TicketService TicketService
+
+<style>
+    /* highlight when scrolling to comment */
+    .highlight-comment {
+        animation: highlightPulse 3s ease-in-out;
+    }
+
+    @@keyframes highlightPulse {
+        0% {
+            background-color: #fff7d6;
+        }
+        60% {
+            background-color: #fff7d6;
+        }
+        100% {
+            background-color: transparent;
+        }
+    }
+
+    /* quoted box */
+    .quoted-box {
+        background-color: #f6f7f8;
+        border-left: 4px solid #dfe9ef;
+        padding: 8px 12px;
+        border-radius: 6px;
+    }
+
+    .quoted-clickable {
+        cursor: pointer;
+    }
+
+    .quoted-preview {
+        background: #f8f9fa;
+        border-radius: 6px;
+        padding: 8px 12px;
+    }
+
+    .comment-author {
+        font-weight: 700;
+    }
+
+    .comment-meta {
+        color: #6c757d;
+        font-size: .9rem;
+        margin-left: .5rem;
+    }
+
+    .comment-content {
+        margin-top: .5rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+
+    /* modal image/file toolbar */
+    .preview-toolbar {
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        padding:.5rem 1rem;
+        border-bottom:1px solid rgba(0,0,0,0.06);
+    }
+    .preview-body {
+        padding:1rem;
+        text-align:center;
+    }
+    .preview-body img { max-width:100%; max-height:70vh; transition: transform .06s linear; }
+    .preview-iframe { width:100%; height:70vh; border:0; }
+
+    .modal-backdrop-custom {
+        position:fixed;
+        inset:0;
+        background: rgba(0,0,0,0.6);
+        z-index:1040;
+    }
+    .modal-panel {
+        position:fixed;
+        inset:0;
+        z-index:1050;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        padding:1.5rem;
+    }
+    .modal-card {
+        width:100%;
+        max-width:1100px;
+        background:#fff;
+        border-radius:.5rem;
+        box-shadow:0 10px 40px rgba(0,0,0,0.2);
+        overflow:hidden;
+    }
+
+    /* small responsive */
+    @@media (max-width:700px) {
+        .quoted-box { padding: 6px 10px; }
+        .preview-body img { max-height:60vh; }
+        .preview-iframe { height:60vh; }
+    }
+</style>
+
+<h3 class="fw-bold text-primary mb-4">
+    <i class="bi bi-ticket-detailed me-2"></i> Chi tiết Ticket #@ticket?.Id
+</h3>
+
+@if (isLoading)
+{
+    <p><em>Đang tải dữ liệu...</em></p>
+}
+else if (ticket == null)
+{
+    <div class="alert alert-danger">Không tìm thấy ticket này.</div>
+}
+else
+{
+    <div class="card shadow-sm mb-3">
+        <div class="card-body">
+            <h5 class="card-title text-success fw-bold" style="font-size:1.25rem;">@ticket.Title</h5>
+            <p><strong>Danh mục:</strong> @ticket.TicketCategory?.Name</p>
+            <p><strong>Người yêu cầu:</strong> @ticket.Requester?.UserName</p>
+            <p><strong>Người được gán:</strong> @(ticket.Assignee?.UserName ?? "Chưa gán")</p>
+            <p><strong>Trạng thái:</strong> @ticket.Status</p>
+            <p><strong>Độ ưu tiên:</strong> @ticket.Priority</p>
+            <p><strong>Cập nhật gần nhất:</strong> @ticket.LastUpdatedAt.ToString("g")</p>
+        </div>
+    </div>
+
+    <!-- Comments -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-light fw-bold">💬 Bình luận / Trao đổi</div>
+        <div class="card-body">
+            @if (comments != null && comments.Any())
+            {
+                @foreach (var c in comments.OrderByDescending(c => c.CreatedAt))
+                {
+                    <div id="comment-@c.Id" class="border-bottom py-2">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <span class="comment-author">@c.Author?.UserName</span>
+                                <small class="comment-meta">(@c.CreatedAt.ToLocalTime().ToString("g"))</small>
+                            </div>
+                            <div>
+                                <button class="btn btn-link btn-sm" @onclick="() => StartReply(c)">
+                                    <i class="bi bi-reply"></i> Trả lời
+                                </button>
+                            </div>
+                        </div>
+
+                        @if (c.ReplyToComment != null)
+                        {
+                            <div class="quoted-box mt-2 quoted-clickable" @onclick="() => ScrollToComment(c.ReplyToComment.Id)"
+                                title="Nhấn để xem bình luận gốc">
+                                <small class="text-muted">Trả lời <strong>@c.ReplyToComment.Author?.UserName</strong>:</small>
+                                <div class="mt-1 comment-content">@((MarkupString)HtmlQuoteShort(c.ReplyToComment.Content))</div>
+                            </div>
+                        }
+
+                        <div class="mt-2 comment-content">@((MarkupString)HighlightMentions(c.Content))</div>
+
+                        @if (c.Attachments != null && c.Attachments.Any())
+                        {
+                            <ul class="mt-2">
+                                @foreach (var file in c.Attachments)
+                                {
+                                    <li>
+                                        @if (IsImageFile(file.FileName))
+                                        {
+                                            <img src="@file.FilePath" alt="@file.FileName" @onclick="() => ShowImagePreviewAsync(file.FilePath)"
+                                                style="max-width:200px; cursor:pointer;" class="rounded shadow-sm" />
+                                        }
+                                        else
+                                        {
+                                            <a href="javascript:void(0)"
+                                                @onclick="() => ShowFilePreviewAsync(file.FilePath, file.FileName)">@file.FileName</a>
+                                        }
+                                        <small class="text-muted ms-2">(@file.UploadedAt.ToLocalTime().ToString("g"))</small>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </div>
+                }
+            }
+            else
+            {
+                <p class="text-muted fst-italic">Chưa có bình luận nào.</p>
+            }
+
+            <hr />
+
+            @* Reply preview *@
+            @if (replyToComment != null)
+            {
+                <div class="mb-2">
+                    <div class="d-flex justify-content-between align-items-start quoted-preview">
+                        <div>
+                            <small class="text-muted">Trả lời <strong>@replyToComment.Author?.UserName</strong>:</small>
+                            <div class="mt-1"><small class="text-muted">@((MarkupString)HtmlQuoteShort(replyToComment.Content))</small></div>
+                        </div>
+                        <div>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="CancelReply">Hủy</button>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            <EditForm Model="@newComment" OnValidSubmit="HandleCommentSubmit">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+
+                <div class="position-relative mb-2">
+                    <InputTextArea @bind-Value="newComment.Content" class="form-control" rows="3"
+                        placeholder="@("Nhập nội dung, có thể gõ @ để tag tài khoản...")" @oninput="HandleTagInput">
+                    </InputTextArea>
+
+                    @if (showSuggestions && filteredUsers.Any())
+                    {
+                        <ul class="list-group position-absolute bg-white border shadow-sm"
+                            style="z-index:999; top:100%; left:0; right:0;">
+                            @foreach (var user in filteredUsers)
+                            {
+                                <li class="list-group-item list-group-item-action" @onclick="() => SelectUserTag(user)">
+                                    <strong>@user.UserName</strong><br />
+                                    <small class="text-muted">@user.Email</small>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+
+                <div class="mb-2">
+                    <InputFile OnChange="HandleFileSelection" multiple class="form-control" />
+                    @if (selectedFiles?.Count > 0)
+                    {
+                        <ul class="small text-muted mt-1">
+                            @foreach (var f in selectedFiles)
+                            {
+                                <li>@f.Name (@(f.Size / 1024) KB)</li>
+                            }
+                        </ul>
+                    }
+                </div>
+
+                <button type="submit" class="btn btn-primary mt-2">
+                    <i class="bi bi-send"></i> Gửi bình luận
+                </button>
+            </EditForm>
+        </div>
+    </div>
+
+    <button class="btn btn-secondary" @onclick="GoBack">
+        <i class="bi bi-arrow-left"></i> Quay lại danh sách
+    </button>
+}
+
+<!-- Image/File Preview Modal -->
+@if (isImagePreviewVisible || isFilePreviewVisible)
+{
+    <div class="modal-backdrop-custom" @onclick="OnBackdropClick"></div>
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-label="File preview">
+        <div class="modal-card">
+            <div class="preview-toolbar">
+                <div>
+                    @if (isImagePreviewVisible)
+                    {
+                        <strong>Preview image</strong>
+                    }
+                    else
+                    {
+                        <strong>Preview file</strong>
+                        <span class="text-muted ms-2">@previewFileName</span>
+                    }
+                </div>
+                <div>
+                    @if (isImagePreviewVisible && !string.IsNullOrEmpty(previewImageUrl))
+                    {
+                        <a class="btn btn-sm btn-light me-2" href="@previewImageUrl" download>
+                            <i class="bi bi-download"></i> Tải về
+                        </a>
+                    }
+                    @if (isFilePreviewVisible && !string.IsNullOrEmpty(previewFileUrl))
+                    {
+                        <a class="btn btn-sm btn-light me-2" href="@previewFileUrl" target="_blank" rel="noopener">
+                            <i class="bi bi-box-arrow-up-right"></i> Mở tab mới
+                        </a>
+                    }
+
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="ClosePreviewAsync">Đóng</button>
+                </div>
+            </div>
+
+            <div class="preview-body">
+                @if (isImagePreviewVisible && !string.IsNullOrEmpty(previewImageUrl))
+                {
+                    <img src="@previewImageUrl" alt="@previewFileName" />
+                }
+                else if (isFilePreviewVisible && !string.IsNullOrEmpty(previewFileUrl))
+                {
+                    <iframe class="preview-iframe" src="@previewFileUrl"></iframe>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private Ticket? ticket;
+    private List<TicketComment> comments = new();
+    private TicketComment newComment = new();
+    private List<IdentityUser> allUsers = new();
+    private List<IdentityUser> filteredUsers = new();
+    private List<IBrowserFile> selectedFiles = new();
+    private bool showSuggestions = false;
+    private bool isLoading = true;
+    private string? currentUserId;
+
+    private bool isImagePreviewVisible = false;
+    private bool isFilePreviewVisible = false;
+    private string? previewImageUrl;
+    private string? previewFileUrl;
+    private string? previewFileName;
+
+    // Reply state
+    private TicketComment? replyToComment;
+    private int? replyToCommentId;
+
+    // attachments flat list for preview navigation
+    private record FileItem(string FilePath, string FileName, bool IsImage);
+    private List<FileItem> attachmentList = new();
+    private int currentPreviewIndex = -1;
+
+    // DotNet reference for JS callbacks
+    private DotNetObjectReference<object>? dotNetRef;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = auth.User;
+        currentUserId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        await LoadTicketAndCommentsAsync();
+    }
+
+    private bool IsImageFile(string fileName)
+        => fileName != null && (fileName.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase)
+            || fileName.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase)
+            || fileName.EndsWith(".png", StringComparison.OrdinalIgnoreCase)
+            || fileName.EndsWith(".gif", StringComparison.OrdinalIgnoreCase));
+
+    private async Task LoadTicketAndCommentsAsync()
+    {
+        isLoading = true;
+
+        await using var db = await ContextFactory.CreateDbContextAsync();
+
+        ticket = await db.Tickets
+            .Include(t => t.TicketCategory)
+            .Include(t => t.Requester)
+            .Include(t => t.Assignee)
+            .FirstOrDefaultAsync(t => t.Id == Id);
+
+        if (ticket != null)
+        {
+            comments = await db.TicketComments
+                .Include(c => c.Author)
+                .Include(c => c.Attachments)
+                .Include(c => c.ReplyToComment)
+                    .ThenInclude(r => r.Author)
+                .Where(c => c.TicketId == Id)
+                .OrderByDescending(c => c.CreatedAt)
+                .ToListAsync();
+
+            // build flat attachment list (in the order they appear)
+            attachmentList = comments
+                .SelectMany(c => c.Attachments.Select(a => new FileItem(a.FilePath, a.FileName, IsImageFile(a.FileName))))
+                .ToList();
+
+            if (!string.IsNullOrEmpty(currentUserId))
+            {
+                var watcher = await db.TicketWatchers
+                    .FirstOrDefaultAsync(w => w.TicketId == Id && w.UserId == currentUserId);
+
+                if (watcher != null && !watcher.IsRead)
+                {
+                    watcher.IsRead = true;
+                    await db.SaveChangesAsync();
+                    try { TicketService?.NotifyTicketsReadChanged(); } catch { }
+                }
+            }
+
+            allUsers = await db.Users.OrderBy(u => u.UserName).ToListAsync();
+        }
+
+        isLoading = false;
+    }
+
+    private void GoBack() => Navigation.NavigateTo("/tickets");
+
+    private void StartReply(TicketComment c)
+    {
+        replyToComment = c;
+        replyToCommentId = c.Id;
+    }
+
+    private void CancelReply()
+    {
+        replyToComment = null;
+        replyToCommentId = null;
+    }
+
+    private void HandleTagInput(ChangeEventArgs e)
+    {
+        var text = e.Value?.ToString() ?? "";
+        var atIndex = text.LastIndexOf('@');
+        if (atIndex >= 0)
+        {
+            var term = text[(atIndex + 1)..].TrimStart();
+            if (term.Length >= 1)
+            {
+                var q = term.ToLowerInvariant();
+                var candidates = allUsers.Where(u =>
+                    (
+                        (!string.IsNullOrEmpty(u.Email) && u.Email.EndsWith("@kbhome.vn", StringComparison.OrdinalIgnoreCase))
+                        || (ticket?.Requester?.Id != null && u.Id == ticket.Requester.Id)
+                    ) &&
+                    (
+                        (!string.IsNullOrEmpty(u.UserName) && u.UserName.Contains(q, StringComparison.OrdinalIgnoreCase))
+                        || (!string.IsNullOrEmpty(u.Email) && u.Email.Contains(q, StringComparison.OrdinalIgnoreCase))
+                    )
+                )
+                .Take(5)
+                .ToList();
+
+                filteredUsers = candidates;
+                showSuggestions = filteredUsers.Any();
+                return;
+            }
+        }
+
+        showSuggestions = false;
+        filteredUsers.Clear();
+    }
+
+    private async Task SelectUserTag(IdentityUser user)
+    {
+        if (string.IsNullOrEmpty(newComment.Content))
+            newComment.Content = "";
+
+        var atIndex = newComment.Content.LastIndexOf('@');
+        if (atIndex >= 0)
+        {
+            var before = newComment.Content.Substring(0, atIndex);
+            newComment.Content = before + "@" + user.UserName + " ";
+        }
+        else
+        {
+            newComment.Content += "@" + user.UserName + " ";
+        }
+
+        showSuggestions = false;
+
+        await using var db = await ContextFactory.CreateDbContextAsync();
+        if (!await db.TicketWatchers.AnyAsync(w => w.TicketId == Id && w.UserId == user.Id))
+        {
+            db.TicketWatchers.Add(new TicketWatcher
+            {
+                TicketId = Id,
+                UserId = user.Id,
+                IsRead = false
+            });
+            await db.SaveChangesAsync();
+            try { TicketService?.NotifyTicketsReadChanged(); } catch { }
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void HandleFileSelection(InputFileChangeEventArgs e)
+    {
+        selectedFiles = e.GetMultipleFiles().ToList();
+    }
+
+    // ---------- Preview logic ----------
+    private async Task ShowImagePreviewAsync(string imageUrl)
+    {
+        previewImageUrl = imageUrl;
+        previewFileUrl = null;
+        previewFileName = null;
+        isImagePreviewVisible = true;
+        isFilePreviewVisible = false;
+
+        // set current index
+        currentPreviewIndex = attachmentList.FindIndex(a => a.FilePath == imageUrl);
+        if (currentPreviewIndex < 0) currentPreviewIndex = -1;
+
+        await RegisterPreviewHandlersAsync();
+        // reset image transform (attach listeners)
+        try { await JS.InvokeVoidAsync("ticketHelpers.resetImageTransform"); } catch { }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ShowFilePreviewAsync(string fileUrl, string fileName)
+    {
+        previewFileUrl = fileUrl;
+        previewFileName = fileName;
+        previewImageUrl = null;
+        isFilePreviewVisible = true;
+        isImagePreviewVisible = false;
+
+        currentPreviewIndex = attachmentList.FindIndex(a => a.FilePath == fileUrl);
+        if (currentPreviewIndex < 0) currentPreviewIndex = -1;
+
+        await RegisterPreviewHandlersAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ClosePreviewAsync()
+    {
+        isImagePreviewVisible = false;
+        isFilePreviewVisible = false;
+        previewImageUrl = null;
+        previewFileUrl = null;
+        previewFileName = null;
+        currentPreviewIndex = -1;
+        await UnregisterAndDisposePreviewHandlersAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnBackdropClick()
+    {
+        await ClosePreviewAsync();
+    }
+
+    private async Task RegisterPreviewHandlersAsync()
+    {
+        try
+        {
+            await UnregisterAndDisposePreviewHandlersAsync();
+            dotNetRef = DotNetObjectReference.Create<object>(this);
+            await JS.InvokeVoidAsync("ticketHelpers.registerPreviewHandlers", dotNetRef);
+        }
+        catch
+        {
+            dotNetRef?.Dispose();
+            dotNetRef = null;
+        }
+    }
+
+    private async Task UnregisterAndDisposePreviewHandlersAsync()
+    {
+        try { await JS.InvokeVoidAsync("ticketHelpers.unregisterPreviewHandlers"); } catch { }
+        try { dotNetRef?.Dispose(); } catch { }
+        dotNetRef = null;
+    }
+
+    [JSInvokable("ClosePreviewFromJs")]
+    public async Task ClosePreviewFromJs()
+    {
+        await ClosePreviewAsync();
+    }
+
+    [JSInvokable("PreviewNext")]
+    public async Task PreviewNext()
+    {
+        await PreviewNavigate(1);
+    }
+
+    [JSInvokable("PreviewPrev")]
+    public async Task PreviewPrev()
+    {
+        await PreviewNavigate(-1);
+    }
+
+    private async Task PreviewNavigate(int dir)
+    {
+        if (!attachmentList.Any()) return;
+        if (currentPreviewIndex < 0)
+        {
+            currentPreviewIndex = 0;
+        }
+        else
+        {
+            var count = attachmentList.Count;
+            currentPreviewIndex = (currentPreviewIndex + dir) % count;
+            if (currentPreviewIndex < 0) currentPreviewIndex += count;
+        }
+
+        var item = attachmentList[currentPreviewIndex];
+        if (item.IsImage)
+        {
+            await ShowImagePreviewAsync(item.FilePath);
+        }
+        else
+        {
+            await ShowFilePreviewAsync(item.FilePath, item.FileName);
+        }
+    }
+
+    // ---------- comment submit & watchers (unchanged) ----------
+    private IEnumerable<string> ExtractMentionedUsernames(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return Enumerable.Empty<string>();
+        var matches = Regex.Matches(content, @"@([^\s@,;:.()]+)");
+        return matches.Select(m => m.Groups[1].Value.Trim())
+                      .Where(s => !string.IsNullOrEmpty(s))
+                      .Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task HandleCommentSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(newComment.Content) && selectedFiles.Count == 0)
+            return;
+
+        await using var db = await ContextFactory.CreateDbContextAsync();
+
+        newComment.TicketId = Id;
+        newComment.AuthorId = currentUserId!;
+        newComment.CreatedAt = DateTime.Now;
+        newComment.ReplyToCommentId = replyToCommentId;
+
+        db.TicketComments.Add(newComment);
+        await db.SaveChangesAsync();
+
+        // Save attachments
+        foreach (var file in selectedFiles)
+        {
+            var folder = Path.Combine("wwwroot", "uploads", "tickets");
+            if (!Directory.Exists(folder))
+                Directory.CreateDirectory(folder);
+
+            var uniqueName = $"{Guid.NewGuid()}_{Path.GetFileName(file.Name)}";
+            var path = Path.Combine(folder, uniqueName);
+
+            await using var stream = File.Create(path);
+            await file.OpenReadStream(20 * 1024 * 1024).CopyToAsync(stream);
+
+            db.TicketAttachments.Add(new TicketAttachment
+            {
+                TicketId = Id,
+                CommentId = newComment.Id,
+                FileName = file.Name,
+                FilePath = $"/uploads/tickets/{uniqueName}",
+                UploadedAt = DateTime.Now,
+                UploaderId = currentUserId
+            });
+        }
+
+        await db.SaveChangesAsync();
+
+        // Build watchers and mark unread (same logic như trước)
+        var watcherIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var ticketEntity = await db.Tickets.AsNoTracking().FirstOrDefaultAsync(t => t.Id == Id);
+        if (ticketEntity != null)
+        {
+            if (!string.IsNullOrEmpty(ticketEntity.RequesterId)) watcherIds.Add(ticketEntity.RequesterId);
+            if (!string.IsNullOrEmpty(ticketEntity.AssigneeId)) watcherIds.Add(ticketEntity.AssigneeId);
+        }
+
+        var authors = await db.TicketComments
+            .Where(c => c.TicketId == Id && c.AuthorId != null)
+            .Select(c => c.AuthorId!)
+            .Distinct()
+            .ToListAsync();
+        foreach (var a in authors) watcherIds.Add(a);
+
+        var mentioned = ExtractMentionedUsernames(newComment.Content);
+        if (mentioned.Any())
+        {
+            var mentionedUsers = await db.Users
+                .Where(u => mentioned.Contains(u.UserName) || mentioned.Contains(u.Email))
+                .Select(u => u.Id)
+                .ToListAsync();
+
+            foreach (var mu in mentionedUsers) watcherIds.Add(mu);
+        }
+
+        var uploaders = await db.TicketAttachments
+            .Where(a => a.TicketId == Id && a.UploaderId != null)
+            .Select(a => a.UploaderId!)
+            .Distinct()
+            .ToListAsync();
+        foreach (var up in uploaders) watcherIds.Add(up);
+
+        foreach (var uid in watcherIds.Where(x => !string.IsNullOrEmpty(x)))
+        {
+            var exists = await db.TicketWatchers.AnyAsync(w => w.TicketId == Id && w.UserId == uid);
+            if (!exists)
+            {
+                db.TicketWatchers.Add(new TicketWatcher
+                {
+                    TicketId = Id,
+                    UserId = uid,
+                    IsRead = (uid == currentUserId)
+                });
+            }
+        }
+        await db.SaveChangesAsync();
+
+        var watchersToMark = await db.TicketWatchers
+            .Where(w => w.TicketId == Id && w.UserId != currentUserId)
+            .ToListAsync();
+
+        foreach (var w in watchersToMark) w.IsRead = false;
+        await db.SaveChangesAsync();
+
+        try { TicketService?.NotifyTicketsReadChanged(); } catch { }
+
+        await LoadTicketAndCommentsAsync();
+
+        newComment = new TicketComment();
+        selectedFiles.Clear();
+        CancelReply();
+        StateHasChanged();
+    }
+
+    private static string EscapeForHtml(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return string.Empty;
+        return s
+            .Replace("&", "&amp;")
+            .Replace("<", "&lt;")
+            .Replace(">", "&gt;")
+            .Replace("\"", "&quot;")
+            .Replace("'", "&#39;");
+    }
+
+    private string HighlightMentions(string content)
+    {
+        if (string.IsNullOrEmpty(content)) return string.Empty;
+        var decoded = WebUtility.HtmlDecode(content);
+        var safe = EscapeForHtml(decoded);
+
+        var result = Regex.Replace(
+            safe,
+            @"@([^\s@]+)",
+            match =>
+            {
+                var uname = match.Groups[1].Value;
+                var safeName = EscapeForHtml(uname);
+                // show name without leading @ and styled
+                return $"<span class='text-danger fw-bold'>{safeName}</span>";
+            });
+
+        return result;
+    }
+
+    private string HtmlQuoteShort(string raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return string.Empty;
+        var decoded = WebUtility.HtmlDecode(raw);
+        var s = decoded.Length > 200 ? decoded.Substring(0, 200).Trim() + "…" : decoded;
+        return EscapeForHtml(s);
+    }
+
+    private async Task ScrollToComment(int commentId)
+    {
+        var elementId = $"comment-{commentId}";
+        try
+        {
+            await JS.InvokeVoidAsync("ticketHelpers.scrollToComment", elementId);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"ScrollToComment error: {ex}");
+            try { Navigation.NavigateTo($"#{elementId}", forceLoad: false); }
+            catch { }
+        }
+    }
+
+    public void Dispose()
+    {
+        _ = UnregisterAndDisposePreviewHandlersAsync();
+    }
+}

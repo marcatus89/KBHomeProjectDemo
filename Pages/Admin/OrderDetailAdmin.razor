@@ -38,24 +38,47 @@ else
         <table class="table table-bordered mt-4">
             <thead>
                 <tr>
-                    <th>STT</th>
-                    <th>Tên Sản phẩm</th>
-                    <th>Số lượng</th>
+                    <th style="width:5%;">STT</th>
+                    <th style="width:55%;">Tên Sản phẩm</th>
+                    <th style="width:10%;" class="text-center">Số lượng</th>
+                    <th style="width:15%;" class="text-end">Đơn giá</th>
+                    <th style="width:15%;" class="text-end">Thành tiền</th>
                 </tr>
             </thead>
             <tbody>
                 @{
                     int count = 1;
+                    decimal subtotal = 0m;
                 }
-                @foreach (var detail in CurrentOrder.OrderDetails)
+                @if (CurrentOrder.OrderDetails != null && CurrentOrder.OrderDetails.Any())
+                {
+                    foreach (var detail in CurrentOrder.OrderDetails)
+                    {
+                        decimal lineTotal = (detail.Price * detail.Quantity);
+                        subtotal += lineTotal;
+                        <tr>
+                            <td>@(count++)</td>
+                            <td>@detail.ProductName</td>
+                            <td class="text-center">@detail.Quantity</td>
+                            <td class="text-end">@FormatCurrency(detail.Price)</td>
+                            <td class="text-end">@FormatCurrency(lineTotal)</td>
+                        </tr>
+                    }
+                }
+                else
                 {
                     <tr>
-                        <td>@(count++)</td>
-                        <td>@detail.ProductName</td>
-                        <td>@detail.Quantity</td>
+                        <td colspan="5" class="text-center text-muted">Không có chi tiết đơn hàng.</td>
                     </tr>
                 }
             </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="4" class="text-end"><strong>Tổng (tạm tính):</strong></td>
+                    <td class="text-end"><strong>@FormatCurrency(subtotal)</strong></td>
+                </tr>
+                @* Nếu bạn có phí vận chuyển / tiền giảm giá / tổng thực tế trên model Order, hiển thị thêm ở đây. *@
+            </tfoot>
         </table>
 
         <div class="signature-section mt-4 d-flex justify-content-between">
@@ -109,6 +132,47 @@ else
 
                         <p><strong>Ngày giao:</strong> @GetDeliveredDateText(CurrentOrder.Shipment)</p>
                     }
+
+                    <hr />
+                    <h5>Chi tiết đơn hàng</h5>
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>STT</th>
+                                <th>Sản phẩm</th>
+                                <th class="text-center">Số lượng</th>
+                                <th class="text-end">Đơn giá</th>
+                                <th class="text-end">Thành tiền</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @{
+                                int idx = 1;
+                                decimal sub = 0m;
+                            }
+                            @if (CurrentOrder.OrderDetails != null && CurrentOrder.OrderDetails.Any())
+                            {
+                                foreach (var d in CurrentOrder.OrderDetails)
+                                {
+                                    var line = d.Price * d.Quantity;
+                                    sub += line;
+                                    <tr>
+                                        <td>@(idx++)</td>
+                                        <td>@d.ProductName</td>
+                                        <td class="text-center">@d.Quantity</td>
+                                        <td class="text-end">@FormatCurrency(d.Price)</td>
+                                        <td class="text-end">@FormatCurrency(line)</td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td colspan="4" class="text-end"><strong>Tổng:</strong></td>
+                                <td class="text-end"><strong>@FormatCurrency(CurrentOrder.OrderDetails?.Sum(d => d.Price * d.Quantity) ?? 0m)</strong></td>
+                            </tr>
+                        </tfoot>
+                    </table>
                 </div>
             </div>
         </div>
@@ -160,6 +224,14 @@ else
                             <button class="btn btn-success w-100" @onclick='async () => { newStatus = "Hoàn thành"; await UpdateStatus(); }'>Xác nhận đã giao thành công</button>
                         }
                     </AuthorizeView>
+                </div>
+            </div>
+
+            <div class="card mt-3">
+                <div class="card-header">Tóm tắt thanh toán</div>
+                <div class="card-body">
+                    <p><strong>Tổng hàng:</strong> @FormatCurrency(CurrentOrder.OrderDetails?.Sum(d => d.Price * d.Quantity) ?? 0m)</p>
+                    @* Nếu model có trường phí vận chuyển hoặc giảm giá, bạn có thể hiển thị thêm ở đây. *@
                 </div>
             </div>
         </div>
@@ -278,7 +350,7 @@ else
                 return;
             }
 
-            // ⭐ Nếu chuyển sang Đã hủy từ trạng thái khác (chưa Đã hủy)
+            // Nếu chuyển sang Đã hủy từ trạng thái khác (chưa Đã hủy)
             if (string.Equals(newStatus, "Đã hủy", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(order.Status, "Đã hủy", StringComparison.OrdinalIgnoreCase))
             {
@@ -534,5 +606,11 @@ else
         if (shipment.DeliveredDate.HasValue)
             return shipment.DeliveredDate.Value.ToLocalTime().ToString("g");
         return "(chưa giao)";
+    }
+
+    // Helper: định dạng tiền VNĐ như project đang dùng
+    private string FormatCurrency(decimal amount)
+    {
+        return $"{amount.ToString("n0")} VNĐ";
     }
 }
