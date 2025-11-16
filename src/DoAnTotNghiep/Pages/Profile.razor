@@ -1,0 +1,98 @@
+@page "/profile"
+@attribute [Authorize]
+@using Microsoft.EntityFrameworkCore
+@inject ApplicationDbContext DbContext
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@using System.Security.Claims
+
+<h3>Trang Cá nhân</h3>
+
+@if (userOrders == null)
+{
+    <LoadingSpinner />
+}
+else
+{
+    <div class="card mb-4">
+        <div class="card-header">
+            Thông tin Tài khoản
+        </div>
+        <div class="card-body">
+            <p><strong>Email:</strong> @userEmail</p>
+        </div>
+    </div>
+
+    <h4>Lịch sử Đơn hàng</h4>
+    @if (!userOrders.Any())
+    {
+        <p>Bạn chưa có đơn hàng nào.</p>
+    }
+    else
+    {
+        <div class="accordion" id="orderHistoryAccordion">
+            @foreach (var order in userOrders)
+            {
+                <div class="accordion-item">
+                    <h2 class="accordion-header" id="heading-@order.Id">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-@order.Id" aria-expanded="false" aria-controls="collapse-@order.Id">
+                            Đơn hàng #@order.Id - Ngày: @order.OrderDate.ToString("dd/MM/yyyy") - Trạng thái: @order.Status
+                        </button>
+                    </h2>
+                    <div id="collapse-@order.Id" class="accordion-collapse collapse" aria-labelledby="heading-@order.Id" data-bs-parent="#orderHistoryAccordion">
+                        <div class="accordion-body">
+                            <p><strong>Người nhận:</strong> @order.CustomerName</p>
+                            <p><strong>Giao đến:</strong> @order.ShippingAddress</p>
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>Sản phẩm</th>
+                                        <th>Số lượng</th>
+                                        <th>Đơn giá</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var detail in order.OrderDetails)
+                                    {
+                                        <tr>
+                                            <td>@detail.ProductName</td>
+                                            <td>@detail.Quantity</td>
+                                            <td>@detail.Price.ToString("n0") VNĐ</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                            <h5 class="text-end">Tổng cộng: @order.TotalAmount.ToString("n0") VNĐ</h5>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+
+
+@code {
+    private List<Order>? userOrders;
+    private string? userEmail;
+
+    [CascadingParameter]
+    private Task<AuthenticationState> authenticationStateTask { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await authenticationStateTask;
+        var user = authState.User;
+
+        if (user.Identity?.IsAuthenticated == true)
+        {
+            userEmail = user.Identity.Name;
+            var userId = user.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            userOrders = await DbContext.Orders
+                .Where(o => o.UserId == userId)
+                .Include(o => o.OrderDetails)
+                .OrderByDescending(o => o.OrderDate)
+                .ToListAsync();
+        }
+    }
+}

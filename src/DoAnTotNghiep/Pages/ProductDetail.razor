@@ -1,0 +1,307 @@
+@page "/san-pham/{ProductId:int}"
+@using System
+@using System.Linq
+@using DoAnTotNghiep.Models
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.Extensions.Logging
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject CartService CartSvc
+@inject ToastService ToastSvc
+@inject ILogger<ProductDetail> Logger
+@inject NavigationManager Navigation
+
+<style>
+  .qty-input .btn { width:40px; height:40px; }
+  .thumb img { object-fit:cover; }
+  .related-card img { height:140px; object-fit:cover; }
+  .product-main-image img { max-height:420px; object-fit:contain; }
+  .product-detail-container { margin-bottom: 2rem; }
+</style>
+
+@if (errorMessage != null)
+{
+    <div class="alert alert-danger">
+        <strong>Lỗi:</strong>
+        <pre style="white-space:pre-wrap">@errorMessage</pre>
+    </div>
+}
+else if (product == null)
+{
+    <LoadingSpinner />
+}
+else
+{
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><NavLink href="/">Trang chủ</NavLink></li>
+            <li class="breadcrumb-item"><NavLink href="/san-pham">Sản phẩm</NavLink></li>
+            @if (!string.IsNullOrWhiteSpace(product.Category?.Name))
+            {
+                <li class="breadcrumb-item">
+                    <NavLink href="@($"/category/{product.CategoryId}")">@product.Category?.Name</NavLink>
+                </li>
+            }
+            <li class="breadcrumb-item active" aria-current="page">@product.Name</li>
+        </ol>
+    </nav>
+
+    <div class="product-detail-container">
+        <div class="row gx-4">
+            <div class="col-lg-6">
+                <div class="card mb-3">
+                    <div class="card-body text-center">
+                        <div class="product-main-image mb-3">
+                            <NavLink href="@($"/san-pham/{product.Id}")">
+                                <img src="@(!string.IsNullOrWhiteSpace(product.ImageUrl) ? product.ImageUrl : "/images/no-image.png")"
+                                    alt="@product.Name"
+                                    class="img-fluid rounded" />
+                            </NavLink>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-6">
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h2 class="mb-2">@product.Name</h2>
+
+                        <div class="mb-3">
+                            @if (product.StockQuantity <= 0)
+                            {
+                                <span class="badge bg-danger ms-2">Hết hàng</span>
+                            }
+                            else if (product.StockQuantity < 10)
+                            {
+                                <span class="badge bg-warning text-dark ms-2">Sắp hết (@product.StockQuantity)</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-success ms-2">Còn @product.StockQuantity</span>
+                            }
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label"><strong>Số lượng</strong></label>
+                            <div class="input-group qty-input" style="max-width:220px;">
+                                <button type="button" class="btn btn-outline-secondary" @onclick="DecreaseQuantity" disabled="@(quantity <= 1)">−</button>
+                                <InputNumber TValue="int" @bind-Value="quantity" class="form-control text-center" min="1" max="@product.StockQuantity" />
+                                <button type="button" class="btn btn-outline-secondary" @onclick="IncreaseQuantity" disabled="@(quantity >= product.StockQuantity)">+</button>
+                            </div>
+                        </div>
+
+                        <div class="mb-3 d-flex gap-2">
+                            <button id="main-add-btn"
+                                    type="button"
+                                    class="btn btn-primary btn-lg"
+                                    @onclick="AddToCartClicked"
+                                    disabled="@(isProcessing || product.StockQuantity == 0)">
+                                <i class="oi oi-cart me-2"></i> Thêm vào giỏ
+                            </button>
+
+                            <button type="button"
+                                    class="btn btn-outline-primary btn-lg"
+                                    @onclick="BuyNow"
+                                    disabled="@(isProcessing || product.StockQuantity == 0)">
+                                Mua ngay
+                            </button>
+
+                        </div>
+
+                        <hr />
+
+                        <div>
+                            <h5>Mô tả sản phẩm</h5>
+                            <p class="text-muted">@GetShortDescription()</p>
+                        </div>
+
+                        <div class="row mt-3">
+                            <div class="col-6">
+                                <ul class="list-unstyled">
+                                    <li><strong>Tồn kho:</strong> @product.StockQuantity</li>
+                                    <li><strong>SKU:</strong> @product.Id</li>
+                                </ul>
+                            </div>
+                            <div class="col-6">
+                                <ul class="list-unstyled">
+                                    <li><strong>Giá:</strong> @product.Price.ToString("n0") VNĐ</li>
+                                    <li><small class="text-muted">Miễn phí giao hàng cho đơn trên 4.000.000 VNĐ</small></li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mt-4">
+        <div class="card-body">
+            <h5>Sản phẩm liên quan</h5>
+            @if (relatedProducts != null && relatedProducts.Any())
+            {
+                <div class="row">
+                    @foreach (var rp in relatedProducts)
+                    {
+                        <div class="col-md-4 col-sm-6 mb-3">
+                            <div class="card related-card h-100">
+                                <NavLink href="@($"/san-pham/{rp.Id}")">
+                                    <img src="@(!string.IsNullOrWhiteSpace(rp.ImageUrl) ? rp.ImageUrl : "/images/no-image.png")" class="card-img-top" alt="@rp.Name" style="height:160px; object-fit:cover;" />
+                                </NavLink>
+                                <div class="card-body">
+                                    <h6 class="card-title mb-1"><NavLink href="@($"/san-pham/{rp.Id}")">@rp.Name</NavLink></h6>
+                                    <div class="text-danger">@rp.Price.ToString("n0") VNĐ</div>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="text-muted">Không có sản phẩm liên quan.</div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int ProductId { get; set; }
+
+    private Product? product;
+    private List<Product>? relatedProducts;
+    private string? errorMessage;
+
+    private int quantity = 1;
+    private bool isProcessing = false;
+
+    // NOTE: sử dụng OnParametersSetAsync để tái tải khi ProductId thay đổi (khi click related link)
+    protected override async Task OnParametersSetAsync()
+    {
+        // reset state để hiển thị loading/alert đúng
+        product = null;
+        relatedProducts = null;
+        errorMessage = null;
+        quantity = 1;
+        isProcessing = false;
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var canConnect = await db.Database.CanConnectAsync();
+            Logger.LogInformation("ProductDetail: Database.CanConnect = {CanConnect}", canConnect);
+
+            product = await db.Products
+                .Include(p => p.Category)
+                .FirstOrDefaultAsync(p => p.Id == ProductId && p.IsVisible);
+
+            if (product == null)
+            {
+                errorMessage = $"Không tìm thấy sản phẩm với ID: {ProductId}.";
+                Logger.LogWarning("Product not found: {ProductId}", ProductId);
+                return;
+            }
+
+            // Lấy các sản phẩm cùng category & visible, loại bản thân product
+            var relatedList = await db.Products
+                .Where(p => p.IsVisible && p.Id != product.Id && p.CategoryId == product.CategoryId)
+                .AsNoTracking()
+                .ToListAsync();
+
+            if (relatedList != null && relatedList.Any())
+            {
+                var rng = new Random();
+                relatedProducts = relatedList
+                    .OrderBy(x => rng.Next())
+                    .Take(3)
+                    .ToList();
+            }
+            else
+            {
+                relatedProducts = new List<Product>();
+            }
+
+            quantity = product.StockQuantity > 0 ? 1 : 0;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Lỗi khi tải thông tin sản phẩm ID={ProductId}", ProductId);
+            errorMessage = $"Đã có lỗi xảy ra khi tải dữ liệu.\n{ex.Message}";
+        }
+    }
+
+    private void IncreaseQuantity()
+    {
+        if (product == null) return;
+        if (quantity < product.StockQuantity) quantity++;
+        Console.WriteLine($"[ProductDetail] IncreaseQuantity -> {quantity}");
+    }
+
+    private void DecreaseQuantity()
+    {
+        if (quantity > 1) quantity--;
+        Console.WriteLine($"[ProductDetail] DecreaseQuantity -> {quantity}");
+    }
+
+    private async Task AddToCartClicked()
+    {
+        Console.WriteLine("[ProductDetail] AddToCartClicked start (server)");
+        if (isProcessing) return;
+        if (product == null)
+        {
+            ToastSvc.ShowToast("Sản phẩm không tồn tại.", ToastLevel.Warning);
+            return;
+        }
+        if (quantity <= 0)
+        {
+            ToastSvc.ShowToast("Vui lòng chọn số lượng hợp lệ.", ToastLevel.Warning);
+            return;
+        }
+        if (product.StockQuantity < quantity)
+        {
+            ToastSvc.ShowToast($"Số lượng có sẵn chỉ còn {product.StockQuantity}.", ToastLevel.Warning);
+            return;
+        }
+
+        isProcessing = true;
+        try
+        {
+            Logger.LogInformation("Adding {Qty}x product {Pid} to cart (CartHash={Hash})", quantity, product.Id, CartSvc.GetHashCode());
+
+            Console.WriteLine($"[ProductDetail] Calling CartSvc.AddToCart productId={product.Id} qty={quantity}");
+            CartSvc.AddToCart(product, quantity);
+            Console.WriteLine($"[ProductDetail] After add totalQty={CartSvc.Items.Sum(i => i.Quantity)}");
+
+            ToastSvc.ShowToast($"Đã thêm {quantity} sản phẩm vào giỏ hàng.", ToastLevel.Success);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[ProductDetail] Exception adding to cart: " + ex);
+            Logger.LogError(ex, "Error adding product to cart");
+            ToastSvc.ShowToast("Đã có lỗi khi thêm sản phẩm vào giỏ hàng.", ToastLevel.Error);
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+
+    private async Task BuyNow()
+    {
+        Console.WriteLine("[ProductDetail] BuyNow clicked (server)");
+        await AddToCartClicked();
+        Navigation.NavigateTo("/gio-hang");
+    }
+
+    private string GetShortDescription()
+    {
+        var desc = product?.GetType().GetProperty("Description")?.GetValue(product) as string;
+        if (!string.IsNullOrWhiteSpace(desc))
+        {
+            return desc.Length > 400 ? desc.Substring(0, 400) + "..." : desc;
+        }
+        return "Chưa có mô tả chi tiết cho sản phẩm này.";
+    }
+}

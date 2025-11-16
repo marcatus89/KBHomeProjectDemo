@@ -1,0 +1,616 @@
+@page "/admin/orders/{OrderId:int}"
+@attribute [Authorize(Roles = "Admin, Sales,Warehouse, Logistics")]
+@using Microsoft.EntityFrameworkCore
+@using DoAnTotNghiep.Models
+@using System.Security.Claims
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
+@inject ToastService ToastSvc
+@inject AuthenticationStateProvider AuthStateProvider
+
+<h3>Chi tiết Đơn hàng #@OrderId</h3>
+
+@if (CurrentOrder == null)
+{
+    <LoadingSpinner />
+}
+else
+{
+    <div id="printable-area" class="printable-container mb-4">
+        <div class="invoice-header d-flex align-items-center mb-4">
+            <img src="/images/logo.png" class="invoice-logo me-4" alt="Company Logo" />
+            <div class="company-details">
+                <strong>Công ty TNHH KBHOME VIETNAM</strong><br />
+                Showroom HCM 46 Song Hành, Phường Bình Trưng, Thành Phố Hồ Chí Minh.<br />
+                Hotline: +84 93 189 48 68
+            </div>
+        </div>
+
+        <h2 class="text-center mt-4">BIÊN BẢN GIAO NHẬN HÀNG HÓA</h2>
+        <p class="text-center">Số Đơn hàng: #@CurrentOrder.Id</p>
+        <hr />
+        <p><strong>Khách hàng:</strong> @CurrentOrder.CustomerName</p>
+        <p><strong>Địa chỉ giao hàng:</strong> @CurrentOrder.ShippingAddress</p>
+        <p><strong>Số điện thoại:</strong> @CurrentOrder.PhoneNumber</p>
+        <p><strong>Ngày giao hàng:</strong> @DateTime.Now.ToString("dd/MM/yyyy")</p>
+
+        <table class="table table-bordered mt-4">
+            <thead>
+                <tr>
+                    <th style="width:5%;">STT</th>
+                    <th style="width:55%;">Tên Sản phẩm</th>
+                    <th style="width:10%;" class="text-center">Số lượng</th>
+                    <th style="width:15%;" class="text-end">Đơn giá</th>
+                    <th style="width:15%;" class="text-end">Thành tiền</th>
+                </tr>
+            </thead>
+            <tbody>
+                @{
+                    int count = 1;
+                    decimal subtotal = 0m;
+                }
+                @if (CurrentOrder.OrderDetails != null && CurrentOrder.OrderDetails.Any())
+                {
+                    foreach (var detail in CurrentOrder.OrderDetails)
+                    {
+                        decimal lineTotal = (detail.Price * detail.Quantity);
+                        subtotal += lineTotal;
+                        <tr>
+                            <td>@(count++)</td>
+                            <td>@detail.ProductName</td>
+                            <td class="text-center">@detail.Quantity</td>
+                            <td class="text-end">@FormatCurrency(detail.Price)</td>
+                            <td class="text-end">@FormatCurrency(lineTotal)</td>
+                        </tr>
+                    }
+                }
+                else
+                {
+                    <tr>
+                        <td colspan="5" class="text-center text-muted">Không có chi tiết đơn hàng.</td>
+                    </tr>
+                }
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="4" class="text-end"><strong>Tổng (tạm tính):</strong></td>
+                    <td class="text-end"><strong>@FormatCurrency(subtotal)</strong></td>
+                </tr>
+                @* Nếu bạn có phí vận chuyển / tiền giảm giá / tổng thực tế trên model Order, hiển thị thêm ở đây. *@
+            </tfoot>
+        </table>
+
+        <div class="signature-section mt-4 d-flex justify-content-between">
+            <div class="signature-box text-center">
+                <p><strong>Bên Giao</strong></p>
+                <p>(Ký, họ tên)</p>
+            </div>
+            <div class="signature-box text-center">
+                <p><strong>Bên Nhận</strong></p>
+                <p>(Ký, họ tên)</p>
+            </div>
+        </div>
+
+        <p class="mt-4"><i>Xác nhận đã nhận đủ số lượng, đúng quy cách, chất lượng hàng hóa.</i></p>
+    </div>
+
+    <div id="display-area" class="row">
+        <div class="col-md-8">
+            <div class="card mb-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <strong>Đơn hàng #@CurrentOrder.Id | Trạng thái:
+                        <span class="badge @GetStatusBadgeClass(CurrentOrder.Status)">@CurrentOrder.Status</span>
+                    </strong>
+
+                    <AuthorizeView Roles="Admin, Logistics">
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="Print">
+                            <span class="oi oi-print"></span> In Biên bản
+                        </button>
+                    </AuthorizeView>
+                </div>
+
+                <div class="card-body">
+                    <h4>Thông tin Khách hàng</h4>
+                    <p><strong>Tên:</strong> @CurrentOrder.CustomerName</p>
+                    <p><strong>Địa chỉ:</strong> @CurrentOrder.ShippingAddress</p>
+                    <p><strong>Số điện thoại:</strong> @CurrentOrder.PhoneNumber</p>
+
+                    @if (!string.IsNullOrWhiteSpace(CurrentOrder.SalesNotes))
+                    {
+                        <hr />
+                        <h5>Ghi chú Sales</h5>
+                        <p class="text-muted">@CurrentOrder.SalesNotes</p>
+                    }
+
+                    @if (CurrentOrder.Shipment != null)
+                    {
+                        <hr />
+                        <h5>Thông tin Giao hàng</h5>
+                        <p><strong>ĐV Vận chuyển:</strong> @CurrentOrder.Shipment.ShippingProvider</p>
+                        <p><strong>Mã vận đơn:</strong> @CurrentOrder.Shipment.TrackingNumber</p>
+
+                        <p><strong>Ngày giao:</strong> @GetDeliveredDateText(CurrentOrder.Shipment)</p>
+                    }
+
+                    <hr />
+                    <h5>Chi tiết đơn hàng</h5>
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>STT</th>
+                                <th>Sản phẩm</th>
+                                <th class="text-center">Số lượng</th>
+                                <th class="text-end">Đơn giá</th>
+                                <th class="text-end">Thành tiền</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @{
+                                int idx = 1;
+                                decimal sub = 0m;
+                            }
+                            @if (CurrentOrder.OrderDetails != null && CurrentOrder.OrderDetails.Any())
+                            {
+                                foreach (var d in CurrentOrder.OrderDetails)
+                                {
+                                    var line = d.Price * d.Quantity;
+                                    sub += line;
+                                    <tr>
+                                        <td>@(idx++)</td>
+                                        <td>@d.ProductName</td>
+                                        <td class="text-center">@d.Quantity</td>
+                                        <td class="text-end">@FormatCurrency(d.Price)</td>
+                                        <td class="text-end">@FormatCurrency(line)</td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td colspan="4" class="text-end"><strong>Tổng:</strong></td>
+                                <td class="text-end"><strong>@FormatCurrency(CurrentOrder.OrderDetails?.Sum(d => d.Price * d.Quantity) ?? 0m)</strong></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">Hành động</div>
+                <div class="card-body">
+                    <AuthorizeView Roles="Admin">
+                        <div class="mb-2">
+                            <label>Cập nhật trạng thái (Admin):</label>
+                            <InputSelect class="form-select" @bind-Value="newStatus">
+                                <option value="Chờ xác nhận">Chờ xác nhận</option>
+                                <option value="Chờ thanh toán">Chờ thanh toán</option>
+                                <option value="Đã thanh toán">Đã thanh toán</option>
+                                <option value="Sẵn sàng giao hàng">Sẵn sàng giao hàng</option>
+                                <option value="Đang giao">Đang giao</option>
+                                <option value="Hoàn thành">Hoàn thành</option>
+                                <option value="Đã hủy">Đã hủy</option>
+                            </InputSelect>
+                        </div>
+                        <button class="btn btn-primary w-100" @onclick="UpdateStatus">Cập nhật</button>
+                    </AuthorizeView>
+
+                    <AuthorizeView Roles="Sales">
+                        @if (CurrentOrder.Status == "Chờ xác nhận")
+                        {
+                            <div class="mb-2">
+                                <label><strong>Ghi chú Sales:</strong></label>
+                                <InputTextArea @bind-Value="salesNoteInput" class="form-control" rows="3" />
+                            </div>
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-success" @onclick='async () => { newStatus = "Chờ thanh toán"; await UpdateStatus(); }'>Xác nhận đơn</button>
+                                <button class="btn btn-danger" @onclick='async () => { newStatus = "Đã hủy"; await UpdateStatus(); }'>Hủy đơn</button>
+                            </div>
+                        }
+                    </AuthorizeView>
+
+                    <AuthorizeView Roles="Warehouse">
+                        @if (CurrentOrder.Status == "Đã thanh toán")
+                        {
+                            <button class="btn btn-info w-100" @onclick='async () => { newStatus = "Sẵn sàng giao hàng"; await UpdateStatus(); }'>Xác nhận đã chuẩn bị hàng</button>
+                        }
+                    </AuthorizeView>
+
+                    <AuthorizeView Roles="Logistics">
+                        @if (CurrentOrder.Status == "Đang giao")
+                        {
+                            <button class="btn btn-success w-100" @onclick='async () => { newStatus = "Hoàn thành"; await UpdateStatus(); }'>Xác nhận đã giao thành công</button>
+                        }
+                    </AuthorizeView>
+                </div>
+            </div>
+
+            <div class="card mt-3">
+                <div class="card-header">Tóm tắt thanh toán</div>
+                <div class="card-body">
+                    <p><strong>Tổng hàng:</strong> @FormatCurrency(CurrentOrder.OrderDetails?.Sum(d => d.Price * d.Quantity) ?? 0m)</p>
+                    @* Nếu model có trường phí vận chuyển hoặc giảm giá, bạn có thể hiển thị thêm ở đây. *@
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public int OrderId { get; set; }
+
+    private Order? CurrentOrder;
+    private string newStatus = string.Empty;
+    private string? salesNoteInput;
+
+    private readonly List<string> _statusOrder = new()
+    {
+        "Chờ xác nhận",
+        "Chờ thanh toán",
+        "Đã thanh toán",
+        "Sẵn sàng giao hàng",
+        "Đang giao",
+        "Hoàn thành"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCurrentOrderAsync();
+    }
+
+    private async Task LoadCurrentOrderAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        CurrentOrder = await db.Orders
+                                .Include(o => o.Shipment)
+                                .Include(o => o.OrderDetails)
+                                .FirstOrDefaultAsync(o => o.Id == OrderId);
+
+        if (CurrentOrder != null)
+        {
+            newStatus = CurrentOrder.Status ?? string.Empty;
+            salesNoteInput = CurrentOrder.SalesNotes;
+        }
+    }
+
+    // ⭐ Chỉ trạng thái "Đã hủy" là trạng thái cuối
+    private bool IsTerminalOrFinal(string status)
+    {
+        return string.Equals(status, "Đã hủy", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ⭐ Cho phép Hoàn thành → Đã hủy
+    private bool IsValidTransition(string oldStatus, string newStatus)
+    {
+        if (string.Equals(oldStatus, "Hoàn thành", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(newStatus, "Đã hủy", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (string.Equals(oldStatus, newStatus, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (IsTerminalOrFinal(oldStatus))
+            return false;
+
+        if (string.Equals(newStatus, "Đã hủy", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var oldIndex = _statusOrder.IndexOf(oldStatus);
+        var newIndex = _statusOrder.IndexOf(newStatus);
+
+        if (oldIndex < 0 || newIndex < 0)
+            return false;
+
+        return newIndex >= oldIndex;
+    }
+
+    private async Task UpdateStatus()
+    {
+        if (CurrentOrder == null || string.IsNullOrEmpty(newStatus))
+            return;
+
+        var oldStatus = CurrentOrder.Status ?? string.Empty;
+
+        if (!IsValidTransition(oldStatus, newStatus))
+        {
+            ToastSvc.ShowToast("Không thể chuyển trạng thái không hợp lệ.", ToastLevel.Warning);
+            return;
+        }
+
+        if (string.Equals(oldStatus, newStatus, StringComparison.OrdinalIgnoreCase))
+        {
+            ToastSvc.ShowToast("Trạng thái không thay đổi.", ToastLevel.Info);
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        await using var tx = await db.Database.BeginTransactionAsync();
+
+        try
+        {
+            var order = await db.Orders
+                                .Include(o => o.OrderDetails)
+                                .Include(o => o.Shipment)
+                                .FirstOrDefaultAsync(o => o.Id == OrderId);
+
+            if (order == null)
+            {
+                ToastSvc.ShowToast("Không tìm thấy đơn hàng.", ToastLevel.Error);
+                await tx.RollbackAsync();
+                return;
+            }
+
+            if (!IsValidTransition(order.Status ?? "", newStatus))
+            {
+                ToastSvc.ShowToast("Chuyển trạng thái không hợp lệ.", ToastLevel.Warning);
+                await tx.RollbackAsync();
+                return;
+            }
+
+            // Nếu chuyển sang Đã hủy từ trạng thái khác (chưa Đã hủy)
+            if (string.Equals(newStatus, "Đã hủy", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(order.Status, "Đã hủy", StringComparison.OrdinalIgnoreCase))
+            {
+                var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+                var user = auth.User;
+                var who = user?.Identity?.Name ?? "Hệ thống";
+
+                // Nhóm trạng thái "sớm" -> tự động tạo phiếu nhập nội bộ và cộng tồn ngay
+                var earlyStatuses = new[] { "Chờ xác nhận", "Chờ thanh toán", "Đã thanh toán" };
+                // Nhóm trạng thái "muộn" -> tạo phiếu thu hồi (ReturnReceipt), không cộng tồn
+                var lateStatuses = new[] { "Sẵn sàng giao hàng", "Đang giao", "Hoàn thành" };
+
+                var current = order.Status ?? string.Empty;
+
+                if (earlyStatuses.Contains(current))
+                {
+                    // Tìm hoặc tạo supplier nội bộ để gắn phiếu nhập
+                    string internalSupplierName = "Nội bộ (Thu hồi tự động)";
+                    var supplier = await db.Suppliers.FirstOrDefaultAsync(s => s.Name == internalSupplierName);
+                    if (supplier == null)
+                    {
+                        supplier = new Supplier
+                        {
+                            Name = internalSupplierName,
+                            ContactPerson = "Hệ thống"
+                        };
+                        await db.Suppliers.AddAsync(supplier);
+                        await db.SaveChangesAsync();
+                    }
+
+                    // Tạo PurchaseOrder và items
+                    var po = new PurchaseOrder
+                    {
+                        SupplierId = supplier.Id,
+                        OrderDate = DateTime.UtcNow,
+                        Status = "Đã nhận hàng", // Vì ta sẽ nhập kho ngay
+                        ExpectedDeliveryDate = null
+                    };
+
+                    foreach (var detail in order.OrderDetails)
+                    {
+                        var poi = new PurchaseOrderItem
+                        {
+                            ProductId = detail.ProductId,
+                            Quantity = detail.Quantity,
+                            ReceivedQuantity = detail.Quantity,
+                            UnitPrice = detail.Price
+                        };
+                        po.Items.Add(poi);
+                    }
+
+                    await db.PurchaseOrders.AddAsync(po);
+                    await db.SaveChangesAsync();
+
+                    // Sinh mã phiếu nhập giống logic hiện có
+                    po.PurchaseOrderNumber = $"PN-{po.Id:D5}";
+                    db.PurchaseOrders.Update(po);
+                    await db.SaveChangesAsync();
+
+                    // Cập nhật tồn ngay theo các item và tạo InventoryLog
+                    foreach (var item in po.Items)
+                    {
+                        var product = await db.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId);
+                        if (product == null) continue;
+
+                        int oldQty = product.StockQuantity;
+                        product.StockQuantity += item.ReceivedQuantity;
+                        db.Products.Update(product);
+
+                        var log = new InventoryLog
+                        {
+                            ProductId = product.Id,
+                            OldQuantity = oldQty,
+                            QuantityChange = item.ReceivedQuantity,
+                            NewQuantity = product.StockQuantity,
+                            Reason = $"Trả hàng do hủy đơn #{order.Id} (tự động, bởi {who})",
+                            Timestamp = DateTime.UtcNow
+                        };
+                        await db.InventoryLogs.AddAsync(log);
+                    }
+
+                    // Cập nhật trạng thái đơn
+                    order.Status = newStatus;
+                    if (!string.IsNullOrWhiteSpace(salesNoteInput))
+                        order.SalesNotes = salesNoteInput;
+
+                    db.Orders.Update(order);
+                    await db.SaveChangesAsync();
+                    await tx.CommitAsync();
+
+                    ToastSvc.ShowToast("Đã hủy đơn, tạo phiếu nhập nội bộ và cộng tồn thành công.", ToastLevel.Success);
+                    await LoadCurrentOrderAsync();
+                    StateHasChanged();
+                    return;
+                }
+                else if (lateStatuses.Contains(current))
+                {
+                    // Trạng thái muộn: tạo ReturnReceipt tự động (phiếu thu hồi), KHÔNG trả tồn
+                    // Tránh tạo trùng nếu đã có phiếu chưa nhận cho order này
+                    var existing = await db.ReturnReceipts
+                                           .FirstOrDefaultAsync(rr => rr.RelatedOrderId == order.Id && rr.Status != "Đã nhận hàng");
+                    if (existing != null)
+                    {
+                        // Cập nhật trạng thái order = Đã hủy, commit, redirect tới phiếu tồn tại
+                        order.Status = newStatus;
+                        if (!string.IsNullOrWhiteSpace(salesNoteInput))
+                            order.SalesNotes = salesNoteInput;
+                        db.Orders.Update(order);
+                        await db.SaveChangesAsync();
+                        await tx.CommitAsync();
+
+                        ToastSvc.ShowToast($"Đã hủy đơn. Phiếu thu hồi đã tồn tại: {existing.ReturnReceiptNumber}.", ToastLevel.Info);
+                        Navigation.NavigateTo($"/admin/return-receipts/{existing.Id}");
+                        return;
+                    }
+
+                    var rr = new ReturnReceipt
+                    {
+                        RelatedOrderId = order.Id,
+                        CreatedAt = DateTime.UtcNow,
+                        Status = "Đã đặt hàng",
+                        CreatedBy = who
+                    };
+
+                    foreach (var detail in order.OrderDetails)
+                    {
+                        var item = new ReturnReceiptItem
+                        {
+                            ProductId = detail.ProductId,
+                            Quantity = detail.Quantity,
+                            ReceivedQuantity = detail.Quantity, // default = order qty; kho có thể chỉnh
+                            UnitPrice = detail.Price
+                        };
+                        rr.Items.Add(item);
+                    }
+
+                    await db.ReturnReceipts.AddAsync(rr);
+                    await db.SaveChangesAsync();
+
+                    // Sinh mã phiếu thu hồi
+                    rr.ReturnReceiptNumber = $"PH-{rr.Id:D5}";
+                    db.ReturnReceipts.Update(rr);
+
+                    // Cập nhật trạng thái đơn = Đã hủy
+                    order.Status = newStatus;
+                    if (!string.IsNullOrWhiteSpace(salesNoteInput))
+                        order.SalesNotes = salesNoteInput;
+
+                    db.Orders.Update(order);
+                    await db.SaveChangesAsync();
+                    await tx.CommitAsync();
+
+                    ToastSvc.ShowToast($"Đã tự động tạo phiếu thu hồi #{rr.ReturnReceiptNumber}. Vui lòng kiểm tra và xác nhận ở giao diện Phiếu thu hồi.", ToastLevel.Info);
+                    Navigation.NavigateTo($"/admin/return-receipts/{rr.Id}");
+                    return;
+                }
+                else
+                {
+                    // Fallback: nếu trạng thái không nằm trong 2 nhóm trên -> trả tồn (an toàn)
+                    foreach (var detail in order.OrderDetails)
+                    {
+                        var product = await db.Products.FirstOrDefaultAsync(p => p.Id == detail.ProductId);
+                        if (product == null) continue;
+
+                        int oldQty = product.StockQuantity;
+                        product.StockQuantity += detail.Quantity;
+                        db.Products.Update(product);
+
+                        var log = new InventoryLog
+                        {
+                            ProductId = product.Id,
+                            OldQuantity = oldQty,
+                            QuantityChange = detail.Quantity,
+                            NewQuantity = product.StockQuantity,
+                            Reason = $"Trả hàng do hủy đơn #{order.Id} (hủy bởi {who})",
+                            Timestamp = DateTime.UtcNow
+                        };
+                        await db.InventoryLogs.AddAsync(log);
+                    }
+
+                    order.Status = newStatus;
+                    if (!string.IsNullOrWhiteSpace(salesNoteInput))
+                        order.SalesNotes = salesNoteInput;
+
+                    db.Orders.Update(order);
+                    await db.SaveChangesAsync();
+                    await tx.CommitAsync();
+
+                    ToastSvc.ShowToast("Đã hủy đơn và trả tồn tự động (fallback).", ToastLevel.Info);
+                    await LoadCurrentOrderAsync();
+                    StateHasChanged();
+                    return;
+                }
+            }
+
+            // Nếu không phải hủy, xử lý bình thường (ví dụ chuyển sang Hoàn thành)
+            order.Status = newStatus;
+            if (!string.IsNullOrWhiteSpace(salesNoteInput))
+                order.SalesNotes = salesNoteInput;
+
+            if (string.Equals(newStatus, "Hoàn thành", StringComparison.OrdinalIgnoreCase) && order.Shipment != null)
+            {
+                var shipment = await db.Shipments.FirstOrDefaultAsync(s => s.Id == order.Shipment.Id);
+                if (shipment != null)
+                {
+                    var prop = shipment.GetType().GetProperty("DeliveredDate");
+                    if (prop != null && prop.PropertyType == typeof(DateTime?))
+                    {
+                        prop.SetValue(shipment, DateTime.UtcNow);
+                        db.Shipments.Update(shipment);
+                    }
+                }
+            }
+
+            db.Orders.Update(order);
+            await db.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            ToastSvc.ShowToast("Cập nhật trạng thái thành công.", ToastLevel.Success);
+
+            await LoadCurrentOrderAsync();
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            Console.WriteLine("[UpdateStatus ERROR] " + ex);
+            ToastSvc.ShowToast("Có lỗi xảy ra.", ToastLevel.Error);
+        }
+    }
+
+    private string GetStatusBadgeClass(string status)
+    {
+        return status switch
+        {
+            "Hoàn thành" => "bg-success",
+            "Đã hủy" => "bg-danger",
+            "Đang giao" => "bg-primary",
+            "Sẵn sàng giao hàng" => "bg-warning text-dark",
+            "Chờ thanh toán" => "bg-info text-dark",
+            _ => "bg-secondary"
+        };
+    }
+
+    private async Task Print()
+    {
+        await JSRuntime.InvokeVoidAsync("triggerPrint");
+    }
+
+    private string GetDeliveredDateText(Shipment? shipment)
+    {
+        if (shipment == null) return "(chưa giao)";
+        if (shipment.DeliveredDate.HasValue)
+            return shipment.DeliveredDate.Value.ToLocalTime().ToString("g");
+        return "(chưa giao)";
+    }
+
+    // Helper: định dạng tiền VNĐ như project đang dùng
+    private string FormatCurrency(decimal amount)
+    {
+        return $"{amount.ToString("n0")} VNĐ";
+    }
+}

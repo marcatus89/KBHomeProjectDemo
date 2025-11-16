@@ -1,0 +1,55 @@
+@page "/tim-kiem"
+@using Microsoft.EntityFrameworkCore
+@inject ApplicationDbContext DbContext
+
+<h3>Kết quả tìm kiếm cho: "@SearchQuery"</h3>
+
+@if (foundProducts == null)
+{
+    <p><em>Đang tìm...</em></p>
+}
+else if (!foundProducts.Any())
+{
+    <p>Không tìm thấy sản phẩm nào phù hợp.</p>
+}
+else
+{
+    <div class="row">
+        @foreach (var product in foundProducts)
+        {
+            <div class="col-md-4 mb-3">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <a href="/san-pham/@product.Id">@product.Name</a>
+                        </h5>
+                        <p class="card-text">@product.Price.ToString("n0") VNĐ</p>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+
+@code {
+    [SupplyParameterFromQuery]
+    public string? query { get; set; }
+
+    private string SearchQuery => query ?? string.Empty;
+    private List<Product>? foundProducts;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(SearchQuery))
+        {
+            foundProducts = await DbContext.Products
+                .Where(p => EF.Functions.Like(p.Name, $"%{SearchQuery}%"))
+                .ToListAsync();
+        }
+        else
+        {
+            foundProducts = new List<Product>();
+        }
+    }
+}

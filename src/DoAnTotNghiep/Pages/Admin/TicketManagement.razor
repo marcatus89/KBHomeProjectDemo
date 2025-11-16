@@ -1,0 +1,650 @@
+@page "/admin/tickets"
+@attribute [Authorize(Roles = "Admin")]
+
+@using DoAnTotNghiep.Models
+@using DoAnTotNghiep.Services
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using System.Linq
+@using System
+
+@inject TicketService TicketService
+@inject IDbContextFactory<ApplicationDbContext> ContextFactory
+@inject IJSRuntime JSRuntime
+@inject ToastService ToastService
+
+<style>
+    /* ----- layout ----- */
+    .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; }
+    .page-title { font-size:2rem; font-weight:700; color:#1f2d3d; margin:0; }
+
+    .filter-card { padding:1rem; border-radius:.6rem; box-shadow:0 6px 18px rgba(41,52,67,.06); margin-bottom:1.25rem; }
+
+    /* Table minimal columns (ID / Title / Actions) */
+    .table-min {
+        width:100%;
+        border-collapse: separate;
+        border-spacing: 0 12px;
+    }
+    .table-min thead th {
+        background:#d8ecff;
+        padding:.9rem .75rem;
+        font-weight:700;
+        color:#0b2b4a;
+        border-bottom:none;
+    }
+    .table-min tbody tr {
+        background:#f6f6f6;
+        border-radius:.5rem;
+    }
+    .table-min tbody td {
+        vertical-align: top;
+        padding:1rem .85rem;
+        border-top:none;
+        border-bottom:none;
+        color:#1f2d3d;
+    }
+
+    /* Title */
+    .ticket-title { font-weight:700; font-size:1.05rem; margin-bottom:.25rem; line-height:1.3; color:#123; display:flex; align-items:center; gap:.5rem; cursor:pointer; }
+    .ticket-category { color:#6c757d; font-size:.92rem; margin-top:.35rem; }
+
+    /* closed badge in title */
+    .closed-badge {
+        background: #e9ecef;
+        color: #495057;
+        padding: .2rem .5rem;
+        border-radius: .5rem;
+        font-weight:600;
+        font-size: .85rem;
+        margin-left: .6rem;
+    }
+
+    /* Expanded details row */
+    .details-row { background:#ffffff; padding: .75rem 1rem; border-radius:.5rem; margin-top:.6rem; box-shadow: 0 4px 12px rgba(12,24,40,0.03); }
+    .details-grid { display:flex; gap:1.25rem; flex-wrap:wrap; align-items:flex-start; }
+    .details-item { min-width:160px; max-width:320px; }
+    .details-label { font-size:.85rem; color:#6c757d; margin-bottom:.25rem; display:block; }
+    .details-value { font-weight:600; color:#1f2d3d; }
+
+    /* Status badge */
+    .status-badge { display:inline-block; padding:.25rem .6rem; border-radius:.6rem; font-weight:700; font-size:.86rem; }
+    .status-open { background:#ffecb8; color:#8a5f00; }
+    .status-inprogress { background:#d9f2ff; color:#05506b; }
+    .status-resolved { background:#d4f2df; color:#0b6d3f; }
+    .status-closed { background:#e9ecef; color:#495057; }
+
+    /* Actions */
+    .ticket-actions { display:flex; gap:.45rem; align-items:center; justify-content:flex-end; flex-wrap:wrap; min-width:160px; }
+    .btn-assign { background:linear-gradient(90deg,#ffd97a,#ffc857); border:1px solid #f1a500; color:#5b3b00; font-weight:600; }
+    .btn-details { background:#10a9b4; color:#fff; }
+    .btn-delete { background:#dc3545; color:#fff; }
+    .btn-change-status { background: linear-gradient(90deg,#9ad8ff, #6bb8ff); color:#073b57; font-weight:700; border:1px solid #2ba2ff; }
+
+    /* Disabled style */
+    .btn[disabled] { opacity:0.6; pointer-events:none; }
+
+    /* Warning icon */
+    .warning-icon { color:#d97706; font-size:1.1rem; }
+
+    /* Modal styles */
+    .modal-backdrop-custom { position:fixed; inset:0; background: rgba(0,0,0,0.45); z-index:1040; }
+    .modal-panel { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:90%; max-width:820px; z-index:1050; }
+    .modal-body { background:#fff; border-radius:.6rem; padding:1rem; box-shadow: 0 10px 30px rgba(10,20,30,.08); }
+
+    /* Responsive tweaks */
+    @@media (max-width: 700px) {
+        .details-grid { flex-direction:column; }
+        .ticket-actions { justify-content:flex-start; }
+    }
+</style>
+
+<div class="page-header">
+    <h1 class="page-title">Ticket Management</h1>
+    <div class="d-flex gap-2">
+        <a class="btn btn-sm btn-primary" href="/admin/ticket-categories">Quản lý Danh mục Tickets</a>
+        <a class="btn btn-sm" href="/ticket/create" style="background:#49e610;color:#fff;">Tạo Ticket Mới</a>
+    </div>
+</div>
+
+<div class="filter-card">
+    <div class="row g-2 align-items-center">
+        <div class="col-md-4">
+            <input class="form-control" placeholder="Title" @bind="tempTitle" />
+        </div>
+        <div class="col-md-2">
+            <input class="form-control" placeholder="Requester" @bind="tempRequester" />
+        </div>
+        <div class="col-md-2">
+            <input class="form-control" placeholder="Assignee" @bind="tempAssignee" />
+        </div>
+        <div class="col-md-1">
+            <select class="form-select" @bind="tempStatus">
+                <option value="">All</option>
+                @foreach (var s in Enum.GetValues<TicketStatus>()) { <option value="@s">@s</option> }
+            </select>
+        </div>
+        <div class="col-md-1">
+            <select class="form-select" @bind="tempPriority">
+                <option value="">All</option>
+                @foreach (var p in Enum.GetValues<TicketPriority>()) { <option value="@p">@p</option> }
+            </select>
+        </div>
+        <div class="col-md-2 text-end">
+            <button class="btn btn-dark" @onclick="ApplyFilters">Lọc</button>
+            <button class="btn btn-outline-secondary ms-2" @onclick="ClearFilters">Xóa</button>
+        </div>
+    </div>
+</div>
+
+@if (allTickets == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table-min">
+            <thead>
+                <tr>
+                    <th style="width:80px">ID</th>
+                    <th>Title</th>
+                    <th style="width:260px">Actions</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                @foreach (var ticket in FilteredTickets)
+                {
+                    var needsWarning = TicketNeedsWarning(ticket);
+                    <tr>
+                        <td>@ticket.Id</td>
+
+                        <td>
+                            <div class="ticket-title" @onclick="() => ToggleDetails(ticket.Id)" title="Click để xem chi tiết">
+                                <span>@ticket.Title</span>
+
+                                @* Warning icon for >8h not closed *@
+                                @if (needsWarning)
+                                {
+                                    <i class="bi bi-exclamation-circle-fill warning-icon" title="Ticket chưa được đóng trong vòng 8 giờ"></i>
+                                }
+
+                                @* If Closed, show Closed at badge *@
+                                @if (ticket.Status == TicketStatus.Closed)
+                                {
+                                    <span class="closed-badge">Đóng vào @ticket.LastUpdatedAt.ToLocalTime().ToString("g")</span>
+                                }
+
+                                @if (!string.IsNullOrEmpty(ticket.TicketCategory?.Name))
+                                {
+                                    <small class="text-muted ms-3">@ticket.TicketCategory.Name</small>
+                                }
+                            </div>
+
+                            @if (expandedTicketIds.Contains(ticket.Id))
+                            {
+                                <div class="details-row">
+                                    <div class="details-grid">
+                                        <div class="details-item">
+                                            <span class="details-label">Người yêu cầu</span>
+                                            @if (ticket.Requester != null)
+                                            {
+                                                <div class="details-value">
+                                                    <div>@ticket.Requester.UserName</div>
+                                                    @if (!IsUserNameSameAsEmail(ticket.Requester))
+                                                    {
+                                                        <div><small class="text-muted">@ticket.Requester.Email</small></div>
+                                                    }
+                                                </div>
+                                            }
+                                            else
+                                            {
+                                                <div class="details-value">Unknown</div>
+                                            }
+                                        </div>
+
+                                        <div class="details-item">
+                                            <span class="details-label">Người gán</span>
+                                            @if (ticket.Assignee != null)
+                                            {
+                                                <div class="details-value">
+                                                    <div>@ticket.Assignee.UserName</div>
+                                                    @if (!IsUserNameSameAsEmail(ticket.Assignee))
+                                                    {
+                                                        <div><small class="text-muted">@ticket.Assignee.Email</small></div>
+                                                    }
+                                                </div>
+                                            }
+                                            else
+                                            {
+                                                <div class="details-value">Unassigned</div>
+                                            }
+                                        </div>
+
+                                        <div class="details-item">
+                                            <span class="details-label">Trạng Thái</span>
+                                            <div class="details-value">@ticket.Status</div>
+                                        </div>
+
+                                        <div class="details-item">
+                                            <span class="details-label">Độ Ưu Tiên</span>
+                                            <div class="details-value">@ticket.Priority</div>
+                                        </div>
+
+                                        <div class="details-item">
+                                            <span class="details-label">Cập Nhật Cuối</span>
+                                            <div class="details-value">@ticket.LastUpdatedAt.ToString("g")</div>
+                                        </div>
+
+                                        <div class="details-item">
+                                            <span class="details-label">Ngày Tạo</span>
+                                            <div class="details-value">@ticket.CreatedAt.ToString("g")</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </td>
+
+                        <td>
+                            <div class="ticket-actions">
+                                <button class="btn btn-assign btn-sm"
+                                        @onclick="() => OpenAssignModal(ticket)"
+                                        disabled="@(ticket.Status != TicketStatus.Open)">
+                                    @(string.IsNullOrEmpty(ticket.AssigneeId) ? "Gán" : "Đổi Người")
+                                </button>
+
+                                <button class="btn btn-change-status btn-sm"
+                                        @onclick="() => OpenChangeStatusModal(ticket)"
+                                        disabled="@(ticket.Status == TicketStatus.Closed)">
+                                    Đổi Trạng Thái
+                                </button>
+
+                                <a class="btn btn-details btn-sm" href="@($"/ticket/{ticket.Id}")">Chi tiết</a>
+
+                                <button class="btn btn-delete btn-sm"
+                                        @onclick="() => DeleteTicket(ticket.Id)"
+                                        disabled="@(ticket.Status != TicketStatus.Open)">
+                                    Xóa
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+<!-- Assign modal -->
+@if (isAssignModalVisible)
+{
+    <div class="modal-backdrop-custom"></div>
+    <div class="modal-panel">
+        <div class="modal-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 class="mb-0">Gán Ticket #@assigningTicket?.Id</h5>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="CloseAssignModal">✕</button>
+            </div>
+
+            <div class="mb-2">
+                <input class="form-control" placeholder="Tìm kiếm người dùng..." @bind="assignSearch" @bind:event="oninput" />
+            </div>
+
+            <div class="list-user">
+                @if (assignableUsers == null)
+                {
+                    <p><em>Loading...</em></p>
+                }
+                else
+                {
+                    @foreach (var u in GetFilteredAssignable())
+                    {
+                        var sel = selectedAssigneeId == u.Id;
+                        <div class="list-item @(sel ? "selected" : "") d-flex justify-content-between align-items-center"
+                             @onclick="() => SelectAssignee(u)">
+                            <div>
+                                <strong>@u.UserName</strong><br />
+                                @if (!IsUserNameSameAsEmail(u))
+                                {
+                                    <small class="text-muted">@u.Email</small>
+                                }
+                            </div>
+                            <div>
+                                <button class="btn btn-sm @(sel ? "btn-success" : "btn-outline-primary")"
+                                        @onclick:stopPropagation="true"
+                                        @onclick="() => SelectAssignee(u)">
+                                    @(sel ? "Selected" : "Select")
+                                </button>
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
+
+            <div class="mt-3 d-flex justify-content-end gap-2">
+                <button class="btn btn-secondary" @onclick="CloseAssignModal">Cancel</button>
+                <button class="btn btn-primary" @onclick="ConfirmAssign" disabled="@(assigningTicket == null || string.IsNullOrEmpty(selectedAssigneeId))">Confirm</button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Change Status modal -->
+@if (isChangeStatusModalVisible)
+{
+    <div class="modal-backdrop-custom"></div>
+    <div class="modal-panel">
+        <div class="modal-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 class="mb-0">Đổi trạng thái - Ticket #@statusChangingTicket?.Id</h5>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="CloseChangeStatusModal">✕</button>
+            </div>
+
+            <div class="mb-2">
+                <label class="form-label">Đổi trạng thái</label>
+                <select class="form-select" @bind="selectedNewStatus">
+                    @if (statusChangingTicket != null)
+                    {
+                        var currentOrder = GetStatusOrder(statusChangingTicket.Status);
+                        foreach (TicketStatus s in Enum.GetValues(typeof(TicketStatus)))
+                        {
+                            var order = GetStatusOrder(s);
+                            <option value="@s" disabled="@(order < currentOrder)">
+                                @s
+                            </option>
+                        }
+                    }
+                </select>
+            </div>
+
+            <div class="mt-3 d-flex justify-content-end gap-2">
+                <button class="btn btn-secondary" @onclick="CloseChangeStatusModal">Hủy</button>
+                <button class="btn btn-primary" @onclick="ConfirmChangeStatus" disabled="@(statusChangingTicket == null || selectedNewStatus == null || statusChangingTicket.Status == TicketStatus.Closed)">Xác nhận</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<Ticket>? allTickets;
+    private List<IdentityUser>? assignableUsers;
+
+    private string tempTitle = string.Empty;
+    private string tempRequester = string.Empty;
+    private string tempAssignee = string.Empty;
+    private string tempStatus = string.Empty;
+    private string tempPriority = string.Empty;
+
+    // expanded details state
+    private HashSet<int> expandedTicketIds = new();
+
+    // assign modal
+    private bool isAssignModalVisible = false;
+    private Ticket? assigningTicket;
+    private string? selectedAssigneeId;
+    private string assignSearch = string.Empty;
+
+    // change status modal
+    private bool isChangeStatusModalVisible = false;
+    private Ticket? statusChangingTicket;
+    private TicketStatus? selectedNewStatus;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            allTickets = await TicketService.GetAllTicketsAsync();
+
+            await using var db = await ContextFactory.CreateDbContextAsync();
+            var rolesToFetch = new[] { "Admin", "Sales", "Warehouse", "Logistics", "Purchasing" };
+
+            assignableUsers = await db.Users
+                .Where(u => db.UserRoles
+                    .Any(ur => ur.UserId == u.Id && db.Roles
+                        .Any(r => rolesToFetch.Contains(r.Name) && r.Id == ur.RoleId)))
+                .OrderBy(u => u.UserName)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERROR] TicketManagement.OnInitializedAsync: {ex}");
+        }
+    }
+
+    private IEnumerable<Ticket> FilteredTickets =>
+        allTickets?
+            .Where(t =>
+                (string.IsNullOrWhiteSpace(tempTitle) || t.Title.Contains(tempTitle, StringComparison.OrdinalIgnoreCase)) &&
+                (string.IsNullOrWhiteSpace(tempRequester) || (t.Requester?.UserName?.Contains(tempRequester, StringComparison.OrdinalIgnoreCase) ?? false)) &&
+                (string.IsNullOrWhiteSpace(tempAssignee) || (t.Assignee?.UserName?.Contains(tempAssignee, StringComparison.OrdinalIgnoreCase) ?? false)) &&
+                (string.IsNullOrWhiteSpace(tempStatus) || t.Status.ToString().Equals(tempStatus, StringComparison.OrdinalIgnoreCase)) &&
+                (string.IsNullOrWhiteSpace(tempPriority) || t.Priority.ToString().Equals(tempPriority, StringComparison.OrdinalIgnoreCase))
+            )
+            .OrderByDescending(t => t.LastUpdatedAt)
+            ?? Enumerable.Empty<Ticket>();
+
+    private void ToggleDetails(int ticketId)
+    {
+        if (expandedTicketIds.Contains(ticketId)) expandedTicketIds.Remove(ticketId);
+        else expandedTicketIds.Add(ticketId);
+    }
+
+    private bool TicketNeedsWarning(Ticket t)
+    {
+        try
+        {
+            if (t == null) return false;
+            if (t.Status == TicketStatus.Closed) return false;
+            var last = t.LastUpdatedAt.ToUniversalTime();
+            return (DateTime.UtcNow - last) > TimeSpan.FromHours(8);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private void ApplyFilters()
+    {
+        StateHasChanged();
+    }
+
+    private void ClearFilters()
+    {
+        tempTitle = tempRequester = tempAssignee = tempStatus = tempPriority = string.Empty;
+    }
+
+    // Assign modal functions
+    private void OpenAssignModal(Ticket ticket)
+    {
+        if (ticket.Status != TicketStatus.Open) return;
+
+        assigningTicket = ticket;
+        selectedAssigneeId = ticket.AssigneeId;
+        assignSearch = string.Empty;
+        isAssignModalVisible = true;
+    }
+
+    private void CloseAssignModal()
+    {
+        isAssignModalVisible = false;
+        assigningTicket = null;
+        selectedAssigneeId = null;
+        assignSearch = string.Empty;
+    }
+
+    private void SelectAssignee(IdentityUser u)
+    {
+        selectedAssigneeId = u.Id;
+    }
+
+    private List<IdentityUser> GetFilteredAssignable()
+    {
+        if (assignableUsers == null) return new List<IdentityUser>();
+        if (string.IsNullOrWhiteSpace(assignSearch)) return assignableUsers;
+        var s = assignSearch.Trim();
+        return assignableUsers
+            .Where(u => (!string.IsNullOrEmpty(u.UserName) && u.UserName.Contains(s, StringComparison.OrdinalIgnoreCase))
+                     || (!string.IsNullOrEmpty(u.Email) && u.Email.Contains(s, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+    }
+
+    private async Task ConfirmAssign()
+    {
+        if (assigningTicket == null || string.IsNullOrEmpty(selectedAssigneeId)) return;
+
+        try
+        {
+            await TicketService.AssignTicketAsync(assigningTicket.Id, selectedAssigneeId);
+            var u = assignableUsers?.FirstOrDefault(x => x.Id == selectedAssigneeId);
+            assigningTicket.Assignee = u;
+            assigningTicket.AssigneeId = u?.Id;
+            ToastService.ShowToast($"Assigned ticket #{assigningTicket.Id} to {u?.UserName}.", ToastLevel.Success);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Assign] {ex}");
+            ToastService.ShowToast("Lỗi gán ticket. Vui lòng thử lại.", ToastLevel.Error);
+        }
+        finally
+        {
+            CloseAssignModal();
+            StateHasChanged();
+        }
+    }
+
+    // Change status modal
+    private void OpenChangeStatusModal(Ticket ticket)
+    {
+        if (ticket.Status == TicketStatus.Closed) return;
+
+        statusChangingTicket = ticket;
+        selectedNewStatus = ticket.Status;
+        isChangeStatusModalVisible = true;
+    }
+
+    private void CloseChangeStatusModal()
+    {
+        isChangeStatusModalVisible = false;
+        statusChangingTicket = null;
+        selectedNewStatus = null;
+    }
+
+    private int GetStatusOrder(TicketStatus s)
+    {
+        // Define workflow order: Open -> InProgress -> Resolved -> Closed
+        return s switch
+        {
+            TicketStatus.Open => 0,
+            TicketStatus.InProgress => 1,
+            TicketStatus.Resolved => 2,
+            TicketStatus.Closed => 3,
+            _ => 0
+        };
+    }
+
+    private async Task ConfirmChangeStatus()
+    {
+        if (statusChangingTicket == null || selectedNewStatus == null) return;
+        if (statusChangingTicket.Status == TicketStatus.Closed) return; // guard
+
+        var currentOrder = GetStatusOrder(statusChangingTicket.Status);
+        var newOrder = GetStatusOrder(selectedNewStatus.Value);
+
+        // Prevent backward transitions
+        if (newOrder < currentOrder)
+        {
+            ToastService.ShowToast("Không thể chuyển trạng thái về trạng thái trước đó.", ToastLevel.Warning);
+            return;
+        }
+
+        // Ask final confirm
+        var ok = await JSRuntime.InvokeAsync<bool>("confirm", $"Đổi trạng thái của ticket #{statusChangingTicket.Id} từ {statusChangingTicket.Status} sang {selectedNewStatus.Value}? Hành động này sẽ cập nhật thời gian LastUpdated.");
+        if (!ok) return;
+
+        try
+        {
+            // Update DB
+            await using var db = await ContextFactory.CreateDbContextAsync();
+            var t = await db.Tickets.FirstOrDefaultAsync(x => x.Id == statusChangingTicket.Id);
+            if (t == null)
+            {
+                ToastService.ShowToast("Không tìm thấy ticket.", ToastLevel.Error);
+                return;
+            }
+
+            // Prevent backward transitions server-side as well
+            var dbCurrentOrder = GetStatusOrder(t.Status);
+            if (GetStatusOrder(selectedNewStatus.Value) < dbCurrentOrder)
+            {
+                ToastService.ShowToast("Không thể chuyển trạng thái về trạng thái trước đó.", ToastLevel.Warning);
+                return;
+            }
+
+            t.Status = selectedNewStatus.Value;
+            t.LastUpdatedAt = DateTime.UtcNow;
+
+            // If closing, set LastUpdatedAt to closed time (used as Closed time)
+            // (If you have a ClosedAt column, set it here instead.)
+            db.Tickets.Update(t);
+            await db.SaveChangesAsync();
+
+            // Update in-memory model
+            var local = allTickets?.FirstOrDefault(x => x.Id == t.Id);
+            if (local != null)
+            {
+                local.Status = t.Status;
+                local.LastUpdatedAt = t.LastUpdatedAt;
+            }
+
+            ToastService.ShowToast($"Status of ticket #{t.Id} updated to {t.Status}.", ToastLevel.Success);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ChangeStatus] {ex}");
+            ToastService.ShowToast("Lỗi cập nhật trạng thái", ToastLevel.Error);
+        }
+        finally
+        {
+            CloseChangeStatusModal();
+            StateHasChanged();
+        }
+    }
+
+    private async Task DeleteTicket(int ticketId)
+    {
+        var t = allTickets?.FirstOrDefault(x => x.Id == ticketId);
+        if (t == null) return;
+        if (t.Status != TicketStatus.Open)
+        {
+            ToastService.ShowToast("Không thể xóa ticket trừ khi trạng thái là Mở.", ToastLevel.Warning);
+            return;
+        }
+
+        var ok = await JSRuntime.InvokeAsync<bool>("confirm", "Bạn có chắc chắn muốn xóa ticket này? Hành động này không thể hoàn tác.");
+        if (!ok) return;
+
+        try
+        {
+            await TicketService.DeleteTicketAsync(ticketId);
+            allTickets?.RemoveAll(x => x.Id == ticketId);
+            ToastService.ShowToast($"Đã xóa ticket {ticketId}.", ToastLevel.Info);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Delete] {ex}");
+            ToastService.ShowToast("Lỗi xóa ticket", ToastLevel.Error);
+        }
+        StateHasChanged();
+    }
+
+    // Helper: check if identity username equals email (case-insensitive)
+    private static bool IsUserNameSameAsEmail(IdentityUser? u)
+    {
+        if (u == null) return false;
+        var name = (u.UserName ?? string.Empty).Trim();
+        var email = (u.Email ?? string.Empty).Trim();
+        return !string.IsNullOrEmpty(name) && string.Equals(name, email, StringComparison.OrdinalIgnoreCase);
+    }
+}

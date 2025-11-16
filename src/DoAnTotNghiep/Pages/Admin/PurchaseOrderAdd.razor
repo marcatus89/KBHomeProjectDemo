@@ -1,0 +1,269 @@
+@page "/admin/purchase-orders/add"
+@attribute [Authorize(Roles = "Admin, Purchasing")]
+@using Microsoft.EntityFrameworkCore
+@inject ApplicationDbContext DbContext
+@inject NavigationManager Navigation
+@inject PurchaseOrderService PurchaseOrderSvc
+@inject ToastService ToastSvc
+
+<h3 class="mb-4 fw-bold text-primary">Tạo Đơn nhập hàng mới</h3>
+
+<EditForm Model="@newPurchaseOrder" OnValidSubmit="HandleCreatePurchaseOrder">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+
+    <div class="card shadow-sm border-0">
+        <div class="card-body">
+            <h5 class="card-title fw-semibold mb-3 text-secondary">Thông tin chung</h5>
+
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="fw-semibold">Chọn Nhà cung cấp</label>
+                    <InputSelect @bind-Value="newPurchaseOrder.SupplierId" class="form-select">
+                        <option value="0">-- Vui lòng chọn --</option>
+                        @if (suppliers != null)
+                        {
+                            @foreach (var supplier in suppliers)
+                            {
+                                <option value="@supplier.Id">@supplier.Name</option>
+                            }
+                        }
+                    </InputSelect>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="fw-semibold">Ngày giao hàng dự kiến</label>
+                    <InputDate @bind-Value="newPurchaseOrder.ExpectedDeliveryDate" class="form-control" />
+                </div>
+            </div>
+
+            <hr class="my-4" />
+
+            <h5 class="card-title fw-semibold text-secondary mb-3">Thêm sản phẩm vào đơn</h5>
+
+            <!-- Hàng 1: Sản phẩm -->
+            <div class="row mb-3">
+                <div class="col-md-12">
+                    <label class="fw-semibold">Sản phẩm</label>
+                    <InputSelect @bind-Value="newItem.ProductId" class="form-select">
+                        <option value="0">-- Chọn sản phẩm --</option>
+                        @if (products != null)
+                        {
+                            @foreach (var product in products)
+                            {
+                                <option value="@product.Id" title="@product.Name">@product.Name</option>
+                            }
+                        }
+                    </InputSelect>
+                </div>
+            </div>
+
+            <!-- Hàng 2: Số lượng, Đơn giá, Nút thêm -->
+            <div class="row align-items-end mb-3">
+                <div class="col-md-4">
+                    <label class="fw-semibold">Số lượng</label>
+                    @* Không cho nhập số âm/0 trên client *@
+                    <InputNumber @bind-Value="newItem.Quantity" class="form-control" min="0" step="1" />
+                </div>
+                <div class="col-md-4">
+                    <label class="fw-semibold">Đơn giá nhập</label>
+                    @* Không cho nhập âm trên client *@
+                    <InputNumber @bind-Value="newItem.UnitPrice" class="form-control" min="0" step="0.01" />
+                </div>
+                <div class="col-md-4 d-grid">
+                    @* Nút chỉ disable khi Quantity <= 0 OR UnitPrice <= 0 *@
+                    <button type="button"
+                            class="btn btn-add-item"
+                            @onclick="AddItem"
+                            disabled="@(!CanAddItem())"
+                            title="@AddItemTooltip">
+                        <i class="bi bi-plus-circle"></i> Thêm sản phẩm
+                    </button>
+                </div>
+            </div>
+
+            <h5 class="card-title fw-semibold mt-4 text-secondary">Các sản phẩm trong đơn</h5>
+            <table class="table table-hover table-bordered align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 40%;">Tên sản phẩm</th>
+                        <th style="width: 15%;">Số lượng</th>
+                        <th style="width: 20%;">Đơn giá</th>
+                        <th style="width: 20%;">Thành tiền</th>
+                        <th style="width: 5%;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (newPurchaseOrder.Items != null && newPurchaseOrder.Items.Any())
+                    {
+                        @foreach (var item in newPurchaseOrder.Items)
+                        {
+                            var productName = products?.FirstOrDefault(p => p.Id == item.ProductId)?.Name ?? "(Không rõ)";
+                            <tr>
+                                <td class="product-name" title="@productName">@productName</td>
+                                <td>@item.Quantity</td>
+                                <td>@item.UnitPrice.ToString("n0")</td>
+                                <td>@((item.Quantity * item.UnitPrice).ToString("n0"))</td>
+                                <td class="text-center">
+                                    <button type="button" class="btn btn-remove-item btn-sm" @onclick="() => RemoveItem(item)">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    }
+                    else
+                    {
+                        <tr>
+                            <td colspan="5" class="text-center text-muted">Chưa có sản phẩm nào</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card-footer text-end bg-light">
+            <button type="submit" class="btn btn-primary btn-lg me-2" disabled="@isProcessing">
+                <i class="bi bi-check-circle"></i> Tạo Đơn nhập hàng
+            </button>
+            <a href="/admin/purchase-orders" class="btn btn-outline-secondary btn-lg">
+                <i class="bi bi-x-circle"></i> Hủy
+            </a>
+        </div>
+    </div>
+</EditForm>
+
+@code {
+    private PurchaseOrder newPurchaseOrder = new() { Items = new List<PurchaseOrderItem>() };
+    private PurchaseOrderItem newItem = new();
+    private List<Supplier>? suppliers;
+    private List<Product>? products;
+    private bool isProcessing = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        suppliers = await DbContext.Suppliers.ToListAsync();
+        products = await DbContext.Products.ToListAsync();
+
+        if (newPurchaseOrder.Items == null)
+            newPurchaseOrder.Items = new List<PurchaseOrderItem>();
+    }
+
+    // tooltip text
+    private string AddItemTooltip
+    {
+        get
+        {
+            if (newItem.Quantity <= 0 && newItem.UnitPrice <= 0) return "Số lượng và Đơn giá phải lớn hơn 0";
+            if (newItem.Quantity <= 0) return "Số lượng phải lớn hơn 0";
+            if (newItem.UnitPrice <= 0) return "Đơn giá phải lớn hơn 0";
+            return "Thêm sản phẩm";
+        }
+    }
+
+    // Enable button only when Quantity > 0 and UnitPrice > 0
+    private bool CanAddItem()
+    {
+        return newItem.Quantity > 0 && newItem.UnitPrice > 0;
+    }
+
+    private void AddItem()
+    {
+        // Server-side validation to ensure correctness
+        if (newItem.Quantity <= 0)
+        {
+            ToastSvc.ShowToast("Số lượng phải lớn hơn 0.", ToastLevel.Warning);
+            return;
+        }
+        if (newItem.UnitPrice <= 0)
+        {
+            ToastSvc.ShowToast("Đơn giá phải lớn hơn 0.", ToastLevel.Warning);
+            return;
+        }
+        if (newItem.ProductId <= 0)
+        {
+            ToastSvc.ShowToast("Vui lòng chọn sản phẩm.", ToastLevel.Warning);
+            return;
+        }
+
+        var existing = newPurchaseOrder.Items.FirstOrDefault(i => i.ProductId == newItem.ProductId);
+        if (existing != null)
+        {
+            existing.Quantity += newItem.Quantity;
+            existing.ReceivedQuantity = Math.Max(existing.ReceivedQuantity, existing.Quantity);
+            existing.UnitPrice = newItem.UnitPrice;
+        }
+        else
+        {
+            var itemToAdd = new PurchaseOrderItem
+            {
+                ProductId = newItem.ProductId,
+                Quantity = newItem.Quantity,
+                UnitPrice = newItem.UnitPrice,
+                ReceivedQuantity = Math.Max(newItem.Quantity, 1)
+            };
+            newPurchaseOrder.Items.Add(itemToAdd);
+        }
+
+        // reset input
+        newItem = new PurchaseOrderItem();
+    }
+
+    private void RemoveItem(PurchaseOrderItem item)
+    {
+        if (newPurchaseOrder.Items.Contains(item))
+        {
+            newPurchaseOrder.Items.Remove(item);
+            ToastSvc.ShowToast("Đã xóa sản phẩm khỏi danh sách.", ToastLevel.Info);
+        }
+    }
+
+    private async Task HandleCreatePurchaseOrder()
+    {
+        if (isProcessing) return;
+
+        if (newPurchaseOrder.SupplierId <= 0)
+        {
+            ToastSvc.ShowToast("Vui lòng chọn Nhà cung cấp trước khi tạo đơn.", ToastLevel.Warning);
+            return;
+        }
+
+        if (newPurchaseOrder.Items == null || !newPurchaseOrder.Items.Any())
+        {
+            ToastSvc.ShowToast("Vui lòng thêm ít nhất 1 sản phẩm vào phiếu.", ToastLevel.Warning);
+            return;
+        }
+
+        // Server-side validation: ensure all items valid
+        foreach (var it in newPurchaseOrder.Items)
+        {
+            if (it.Quantity <= 0)
+            {
+                ToastSvc.ShowToast("Có sản phẩm có số lượng không hợp lệ (<= 0). Vui lòng kiểm tra lại.", ToastLevel.Warning);
+                return;
+            }
+            if (it.UnitPrice <= 0)
+            {
+                ToastSvc.ShowToast("Có sản phẩm có đơn giá không hợp lệ (<= 0). Vui lòng kiểm tra lại.", ToastLevel.Warning);
+                return;
+            }
+
+            if (it.ReceivedQuantity <= 0) it.ReceivedQuantity = it.Quantity;
+        }
+
+        isProcessing = true;
+        try
+        {
+            await PurchaseOrderSvc.CreatePurchaseOrderAsync(newPurchaseOrder);
+            ToastSvc.ShowToast("Đã tạo Đơn nhập hàng thành công.", ToastLevel.Success);
+            Navigation.NavigateTo("/admin/purchase-orders");
+        }
+        catch (Exception ex)
+        {
+            ToastSvc.ShowToast($"Lỗi khi tạo đơn: {ex.Message}", ToastLevel.Error);
+        }
+        finally
+        {
+            isProcessing = false;
+        }
+    }
+}

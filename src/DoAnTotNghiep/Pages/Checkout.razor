@@ -1,0 +1,132 @@
+@page "/thanh-toan"
+@attribute [Authorize]
+@using System.Security.Claims
+@inject NavigationManager Navigation
+@inject OrderService OrderSvc
+@inject CartService CartSvc
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject ToastService ToastSvc
+
+
+<h3>Thông tin Thanh toán</h3>
+
+@if (isSubmitting)
+{
+    <p><em>Đang xử lý đơn hàng của bạn...</em></p>
+}
+else if (errorMessage != null)
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+@if (!CartSvc.Items.Any())
+{
+    <p>Giỏ hàng của bạn đang trống. Vui lòng thêm sản phẩm trước khi thanh toán.</p>
+}
+else
+{
+    <EditForm Model="@order" OnValidSubmit="HandleValidSubmit">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="form-group mb-3">
+            <label for="customerName">Họ và tên</label>
+            <InputText id="customerName" class="form-control" @bind-Value="order.CustomerName" />
+        </div>
+        <div class="form-group mb-3">
+            <label for="shippingAddress">Địa chỉ giao hàng</label>
+            <InputText id="shippingAddress" class="form-control" @bind-Value="order.ShippingAddress" />
+        </div>
+        <div class="form-group mb-3">
+            <label for="phoneNumber">Số điện thoại</label>
+            <InputText id="phoneNumber" class="form-control" @bind-Value="order.PhoneNumber" />
+        </div>
+
+        <div class="mb-3">
+            <strong>Tạm tính:</strong> @CartSvc.Total.ToString("n0") VNĐ
+        </div>
+
+        <button type="submit" class="btn btn-primary" disabled="@isSubmitting">
+            @if (isSubmitting)
+            {
+                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                <span> Đang xử lý...</span>
+            }
+            else
+            {
+                <span>Xác nhận và Đặt hàng</span>
+            }
+        </button>
+
+        <button type="button" class="btn btn-secondary ms-2" @onclick="BackToCart">Quay về Giỏ hàng</button>
+    </EditForm>
+
+    <div class="mt-3">
+        <small class="text-muted">Bạn đang đặt @CartSvc.Items.Count mặt hàng — tổng: @CartSvc.Total.ToString("n0") VNĐ</small>
+    </div>
+}
+
+@code {
+    private Order order = new Order();
+    private string? errorMessage;
+    private bool isSubmitting = false;
+
+    [CascadingParameter]
+    private Task<AuthenticationState> authenticationStateTask { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Console.WriteLine("[Checkout] OnInitialized - cart items = " + CartSvc.Items.Count);
+        foreach (var it in CartSvc.Items)
+        {
+            Console.WriteLine($"[Checkout] OnInit Item: {it.ProductId} {it.ProductName} qty={it.Quantity} price={it.Price}");
+        }
+    }
+
+    private void BackToCart()
+    {
+        Navigation.NavigateTo("/gio-hang");
+    }
+
+    private async Task HandleValidSubmit()
+    {
+        isSubmitting = true;
+        errorMessage = null;
+
+        var authState = await authenticationStateTask;
+        var user = authState.User;
+
+        Console.WriteLine("[Checkout] HandleValidSubmit - Cart items count: " + CartSvc.Items.Count);
+        foreach (var it in CartSvc.Items)
+        {
+            Console.WriteLine($"[Checkout] Item: {it.ProductId} {it.ProductName} qty={it.Quantity} price={it.Price}");
+        }
+
+        try
+        {
+            var result = await OrderSvc.PlaceOrderAsync(order, user, CartSvc.Items);
+            Console.WriteLine("[Checkout] PlaceOrderAsync result: Success=" + result.Success + " Error=" + result.ErrorMessage + " OrderId=" + result.OrderId);
+
+            if (result.Success)
+            {
+                // Xóa giỏ hàng chỉ khi tạo đơn thành công
+                CartSvc.ClearCart();
+                ToastSvc.ShowToast($"✅ Đã tạo đơn #{result.OrderId}. Cảm ơn bạn!", ToastLevel.Success);
+
+                // Điều hướng tới trang xác nhận/thank-you
+                Navigation.NavigateTo("/xac-nhan-don-hang");
+            }
+            else
+            {
+                errorMessage = result.ErrorMessage ?? "Có lỗi khi tạo đơn. Vui lòng thử lại.";
+                isSubmitting = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[Checkout] Exception during PlaceOrderAsync: " + ex);
+            errorMessage = "Có lỗi khi tạo đơn. Vui lòng thử lại.";
+            isSubmitting = false;
+        }
+    }
+}

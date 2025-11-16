@@ -1,0 +1,35 @@
+@using Microsoft.EntityFrameworkCore
+@inject ApplicationDbContext DbContext
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-dark text-white">
+        <h5>Danh mục Sản phẩm</h5>
+    </div>
+    <div class="list-group list-group-flush">
+        <NavLink href="san-pham" Match="NavLinkMatch.All" class="list-group-item list-group-item-action">
+            Tất cả Sản phẩm
+        </NavLink>
+        @if (categories == null)
+        {
+            <div class="list-group-item"><em>Đang tải...</em></div>
+        }
+        else
+        {
+            @foreach (var category in categories)
+            {
+                <NavLink href="@($"category/{category.Id}")" class="list-group-item list-group-item-action">
+                    @category.Name
+                </NavLink>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private List<Category>? categories;
+
+    protected override async Task OnInitializedAsync()
+    {
+        categories = await DbContext.Categories.OrderBy(c => c.Name).ToListAsync();
+    }
+}

@@ -1,0 +1,1048 @@
+@page "/admin/products"
+@page "/admin/products/{page:int}"
+@attribute [Authorize(Roles = "Admin, Warehouse")]
+
+@using Microsoft.EntityFrameworkCore
+@using System.Security.Claims
+@using System.Linq
+@using DoAnTotNghiep.Models
+@using System.Collections.Generic
+
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Navigation
+@inject ToastService ToastSvc
+@inject IJSRuntime JS
+
+<h3 class="d-flex align-items-center gap-3">
+    <span>Quản lý Sản phẩm</span>
+    <button class="btn btn-sm btn-outline-secondary" @onclick="RefreshPage" title="Làm mới dữ liệu">
+        <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+</h3>
+
+<div class="d-flex justify-content-between align-items-center mb-3 gap-3 flex-wrap">
+    <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary btn-sm" @onclick="GoBack" title="Quay lại trang trước">
+            <i class="bi bi-arrow-left"></i>
+            <span class="d-none d-sm-inline ms-1">Quay lại</span>
+        </button>
+
+        <a href="/admin/products/add" class="btn btn-primary">
+            <i class="bi bi-plus-lg me-1"></i> Thêm sản phẩm mới
+        </a>
+    </div>
+
+    <div class="ms-auto d-flex align-items-center gap-2" style="min-width:320px;">
+        <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input @bind="searchTerm" @bind:event="oninput" class="form-control" placeholder="Nhập tên sản phẩm cần tìm..." aria-label="Tìm sản phẩm" />
+            <button class="btn btn-outline-primary" @onclick="SearchProducts" title="Tìm kiếm">
+                <i class="bi bi-filter-circle"></i> Tìm
+            </button>
+            <button class="btn btn-outline-secondary" @onclick="ClearSearch" title="Xóa lọc">
+                <i class="bi bi-x-circle"></i> Xóa
+            </button>
+        </div>
+    </div>
+</div>
+
+@if (pagedProducts == null)
+{
+    <LoadingSpinner />
+}
+else
+{
+    <div class="table-responsive shadow-sm rounded">
+        <table class="table table-hover align-middle mb-0 table-fixed">
+            <colgroup>
+                <col style="width:40%;" />
+                <col style="width:140px;" />
+                <col style="width:100px;" />
+                <col style="width:100px;" />
+                <col style="width:100px;" />
+                <col style="width:100px;" />
+                <col style="width:100px;" />
+                <col style="width:100px;" />
+                <col style="width:200px;" />
+            </colgroup>
+
+            <thead class="table-light">
+                <tr>
+                    <th>Tên Sản phẩm</th>
+                    <th style="width:140px;">Giá</th>
+                    <th class="text-center" style="width:100px;">Tồn kho</th>
+
+                    <th class="text-center d-none d-md-table-cell" style="width:100px;">Số lượng nhập mới</th>
+                    <th class="text-center d-none d-md-table-cell" style="width:100px;">Số lượng xuất</th>
+                    <th class="text-center d-none d-md-table-cell" style="width:100px;">Số lượng nhập hoàn</th>
+                    <th class="text-center d-none d-md-table-cell" style="width:100px;">Số lượng điều chỉnh</th>
+
+                    <th class="text-center" style="width:100px;">Hiển thị</th>
+                    <th class="text-center" style="width:200px;">Hành động</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (pagedProducts.Any())
+                {
+                    @foreach (var product in pagedProducts)
+                    {
+                        var inc = incomingDict.TryGetValue(product.Id, out var i) ? i : 0;
+                        var outg = outgoingDict.TryGetValue(product.Id, out var o) ? o : 0;
+                        var ret = returnsDict.TryGetValue(product.Id, out var r) ? r : 0;
+                        var adj = adjustmentsDict.TryGetValue(product.Id, out var a) ? a : 0;
+
+                        <tr>
+                            <td>
+                                <div class="product-name">
+                                    <button class="product-name-btn" @onclick="() => ShowImage(product)">
+                                        @product.Name
+                                    </button>
+                                </div>
+                            </td>
+
+                            <td class="text-nowrap text-end">@product.Price.ToString("n0") VNĐ</td>
+
+                            <td class="text-center">
+                                @if (product.StockQuantity == 0)
+                                {
+                                    <span class="badge bg-danger">Hết hàng</span>
+                                }
+                                else if (product.StockQuantity < 10)
+                                {
+                                    <span class="badge bg-warning text-dark">Sắp hết (@product.StockQuantity)</span>
+                                }
+                                else
+                                {
+                                    @product.StockQuantity
+                                }
+                            </td>
+
+                            <td class="text-center d-none d-md-table-cell">
+                                <button class="btn btn-link p-0" @onclick="() => ShowIncoming(product.Id)">@inc</button>
+                            </td>
+
+                            <td class="text-center d-none d-md-table-cell">
+                                <button class="btn btn-link p-0" @onclick="() => ShowOutgoing(product.Id)">@outg</button>
+                            </td>
+
+                            <td class="text-center d-none d-md-table-cell">
+                                <button class="btn btn-link p-0" @onclick="() => ShowReturns(product.Id)">@ret</button>
+                            </td>
+
+                            <td class="text-center d-none d-md-table-cell">
+                                <button class="btn btn-link p-0" @onclick="() => ShowAdjustments(product.Id)">@adj</button>
+                            </td>
+
+                            <td class="text-center">
+                                @if (product.IsVisible)
+                                {
+                                    <span class="badge bg-success">Đang hiển thị</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">Đang ẩn</span>
+                                }
+                            </td>
+                            <td class="text-center">
+                                <div class="d-flex justify-content-end gap-2 flex-wrap">
+                                    <a class="btn btn-sm btn-outline-secondary" href="@($"admin/products/edit/{product.Id}")" title="Sửa">
+                                        <i class="bi bi-pencil-square"></i>
+                                    </a>
+
+                                    <a class="btn btn-sm btn-outline-info" href="@($"admin/inventory-history/{product.Id}")" title="Lịch sử tồn kho">
+                                        <i class="bi bi-clock-history"></i>
+                                    </a>
+
+                                    <button class="btn btn-sm btn-outline-warning" @onclick="() => ToggleVisibility(product.Id)" title="Ẩn/Hiện">
+                                        <i class="bi @(product.IsVisible ? "bi-eye-slash" : "bi-eye")"></i>
+                                    </button>
+
+                                    <button class="btn btn-sm btn-outline-dark"
+        @onclick="() => ShowProductInfo(product)"
+        title="Thông tin chỉnh sửa">
+    <i class="bi bi-info-circle"></i>
+</button>
+
+                                    <button class="btn btn-sm btn-danger" @onclick="() => ConfirmDelete(product.Id, product.Name)" title="Xóa">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                }
+                else
+                {
+                    <tr><td colspan="9" class="text-center text-muted">Không có sản phẩm phù hợp.</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (totalPages > 1)
+    {
+        <nav aria-label="Page navigation" class="mt-3">
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <div>
+                    <a class="btn btn-outline-secondary btn-sm rounded-pill d-flex align-items-center"
+                       href="@($"/admin/products/{Math.Max(currentPage - 1, 1)}")"
+                       aria-disabled="@(currentPage == 1 ? "true" : "false")"
+                       title="Trang trước">
+                        <i class="bi bi-chevron-left me-1"></i> Trước
+                    </a>
+                </div>
+
+                <div class="d-flex align-items-center flex-wrap" style="gap:6px;">
+                    @{
+                        int maxButtons = 7;
+                        int start = Math.Max(1, currentPage - maxButtons / 2);
+                        int end = Math.Min(totalPages, start + maxButtons - 1);
+                        if (end - start + 1 < maxButtons)
+                        {
+                            start = Math.Max(1, end - maxButtons + 1);
+                        }
+                    }
+
+                    @if (start > 1)
+                    {
+                        <a class="btn btn-outline-secondary btn-sm rounded-pill" href="@($"/admin/products/1")">1</a>
+                        @if (start > 2)
+                        {
+                            <span class="text-muted px-2">…</span>
+                        }
+                    }
+
+                    @for (int i = start; i <= end; i++)
+                    {
+                        var pageNum = i;
+                        if (pageNum == currentPage)
+                        {
+                            <a class="btn btn-primary btn-sm rounded-pill" href="@($"/admin/products/{pageNum}")" aria-current="page">@pageNum</a>
+                        }
+                        else
+                        {
+                            <a class="btn btn-outline-secondary btn-sm rounded-pill" href="@($"/admin/products/{pageNum}")">@pageNum</a>
+                        }
+                    }
+
+                    @if (end < totalPages)
+                    {
+                        if (end < totalPages - 1)
+                        {
+                            <span class="text-muted px-2">…</span>
+                        }
+                        <a class="btn btn-outline-secondary btn-sm rounded-pill" href="@($"/admin/products/{totalPages}")">@totalPages</a>
+                    }
+                </div>
+
+                <div class="d-flex align-items-center gap-3">
+                    <a class="btn btn-outline-secondary btn-sm rounded-pill d-flex align-items-center"
+                       href="@($"/admin/products/{Math.Min(currentPage + 1, totalPages)}")"
+                       aria-disabled="@(currentPage == totalPages ? "true" : "false")"
+                       title="Trang sau">
+                        Sau <i class="bi bi-chevron-right ms-1"></i>
+                    </a>
+
+                    <div class="text-muted small">
+                        Trang <strong>@currentPage</strong> / <strong>@totalPages</strong>
+                        &nbsp;&middot;&nbsp; Tổng: <strong>@totalItems</strong> sản phẩm
+                    </div>
+                </div>
+            </div>
+        </nav>
+    }
+
+    <div class="mt-2 text-muted text-end">
+        <small>Tổng: @totalItems sản phẩm</small>
+    </div>
+}
+
+@* Modals (giữ nguyên/bổ sung) *@
+@if (showImageModal)
+{
+    <div class="modal-overlay" @onclick="CloseImageModal" role="dialog" aria-modal="true">
+        <div class="modal-content-custom" @onclick:stopPropagation>
+            <button class="btn-close-modal" @onclick="CloseImageModal" aria-label="Đóng">&times;</button>
+            <h5 class="mb-3">@modalProductName</h5>
+            <img src="@modalImageUrl" alt="@modalProductName" class="modal-img mb-3" />
+            <div>
+                <button class="btn btn-secondary" @onclick="CloseImageModal">Đóng</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showIncomingModal)
+{
+    <div class="modal-overlay" @onclick="CloseIncomingModal" role="dialog" aria-modal="true">
+        <div class="modal-content-custom" @onclick:stopPropagation>
+            <button class="btn-close-modal" @onclick="CloseIncomingModal" aria-label="Đóng">&times;</button>
+            <h5 class="mb-3">Phiếu nhập (Đã đặt hàng / Chờ phê duyệt / Bị từ chối) - Sản phẩm @currentProduct?.Name (ID:@currentProduct?.Id)</h5>
+
+            @if (incomingLoading)
+            {
+                <LoadingSpinner />
+            }
+            else if (incomingPOs == null || !incomingPOs.Any())
+            {
+                <div class="alert alert-info">Không có phiếu nhập phù hợp.</div>
+            }
+            else
+            {
+                <table class="table">
+                    <thead>
+                        <tr><th>Số phiếu</th><th>Nhà cung cấp</th><th>Ngày đặt</th><th>Trạng thái</th><th>Số lượng đặt</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var po in incomingPOs)
+                        {
+                            var item = po.Items.FirstOrDefault(i => i.ProductId == currentProduct?.Id);
+                            <tr>
+                                <td>@po.PurchaseOrderNumber</td>
+                                <td>@po.Supplier?.Name</td>
+                                <td>@po.OrderDate.ToString("dd/MM/yyyy")</td>
+                                <td>@po.Status</td>
+                                <td>@(item?.Quantity ?? 0)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+
+            <div class="text-end">
+                <button class="btn btn-secondary" @onclick="CloseIncomingModal">Đóng</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showOutgoingModal)
+{
+    <div class="modal-overlay" @onclick="CloseOutgoingModal" role="dialog" aria-modal="true">
+        <div class="modal-content-custom" @onclick:stopPropagation>
+            <button class="btn-close-modal" @onclick="CloseOutgoingModal" aria-label="Đóng">&times;</button>
+            <h5 class="mb-3">Đơn hàng (Chờ xác nhận / Chờ thanh toán / Đã thanh toán) - Sản phẩm @currentProduct?.Name (ID:@currentProduct?.Id)</h5>
+
+            @if (outgoingLoading)
+            {
+                <LoadingSpinner />
+            }
+            else if (outgoingOrders == null || !outgoingOrders.Any())
+            {
+                <div class="alert alert-info">Không có đơn hàng phù hợp.</div>
+            }
+            else
+            {
+                <table class="table">
+                    <thead>
+                        <tr><th>ID Đơn</th><th>Khách hàng</th><th>Trạng thái</th><th>Ngày đặt</th><th>Số lượng</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var o in outgoingOrders)
+                        {
+                            var od = o.OrderDetails.FirstOrDefault(d => d.ProductId == currentProduct?.Id);
+                            <tr>
+                                <td>@o.Id</td>
+                                <td>@o.CustomerName</td>
+                                <td>@o.Status</td>
+                                <td>@o.OrderDate.ToString("g")</td>
+                                <td>@(od?.Quantity ?? 0)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+
+            <div class="text-end">
+                <button class="btn btn-secondary" @onclick="CloseOutgoingModal">Đóng</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showReturnsModal)
+{
+    <div class="modal-overlay" @onclick="CloseReturnsModal" role="dialog" aria-modal="true">
+        <div class="modal-content-custom" @onclick:stopPropagation>
+            <button class="btn-close-modal" @onclick="CloseReturnsModal" aria-label="Đóng">&times;</button>
+            <h5 class="mb-3">Phiếu nhập hoàn (Đã đặt hàng / Chờ phê duyệt) - Sản phẩm @currentProduct?.Name (ID:@currentProduct?.Id)</h5>
+
+            @if (returnsLoading)
+            {
+                <LoadingSpinner />
+            }
+            else if (returnReceipts == null || !returnReceipts.Any())
+            {
+                <div class="alert alert-info">Không có phiếu nhập hoàn phù hợp.</div>
+            }
+            else
+            {
+                <table class="table">
+                    <thead>
+                        <tr><th>Số phiếu</th><th>Đơn liên quan</th><th>Trạng thái</th><th>Số lượng đề nghị</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var rr in returnReceipts)
+                        {
+                            var item = rr.Items.FirstOrDefault(i => i.ProductId == currentProduct?.Id);
+                            <tr>
+                                <td>@rr.ReturnReceiptNumber</td>
+                                <td>@(rr.RelatedOrderId?.ToString() ?? "-")</td>
+                                <td>@rr.Status</td>
+                                <td>@(item?.Quantity ?? 0)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+
+            <div class="text-end">
+                <button class="btn btn-secondary" @onclick="CloseReturnsModal">Đóng</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showAdjustmentsModal)
+{
+    <div class="modal-overlay" @onclick="CloseAdjustmentsModal" role="dialog" aria-modal="true">
+        <div class="modal-content-custom" @onclick:stopPropagation>
+            <button class="btn-close-modal" @onclick="CloseAdjustmentsModal" aria-label="Đóng">&times;</button>
+            <h5 class="mb-3">Yêu cầu điều chỉnh (Pending) - Sản phẩm @currentProduct?.Name (ID:@currentProduct?.Id)</h5>
+
+            @if (adjustmentsLoading)
+            {
+                <LoadingSpinner />
+            }
+            else if (adjustmentRequests == null || !adjustmentRequests.Any())
+            {
+                <div class="alert alert-info">Không có yêu cầu điều chỉnh đang Pending.</div>
+            }
+            else
+            {
+                <table class="table">
+                    <thead>
+                        <tr><th>ID</th><th>Old</th><th>Requested</th><th>By</th><th>Requested At</th><th>Status</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in adjustmentRequests)
+                        {
+                            <tr>
+                                <td>@r.Id</td>
+                                <td class="text-center">@r.OldQuantity</td>
+                                <td class="text-center">@r.RequestedQuantity</td>
+                                <td>@r.RequestedByEmail</td>
+                                <td>@r.RequestedAt.ToLocalTime().ToString("g")</td>
+                                <td>@r.Status</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+
+            <div class="text-end">
+                <button class="btn btn-secondary" @onclick="CloseAdjustmentsModal">Đóng</button>
+            </div>
+        </div>
+    </div>
+}
+@if (showInfoModal)
+{
+    <div class="modal-overlay" @onclick="CloseInfoModal" role="dialog" aria-modal="true">
+        <div class="modal-content-custom" @onclick:stopPropagation>
+            <button class="btn-close-modal" @onclick="CloseInfoModal">&times;</button>
+
+            <h5 class="mb-3">Thông tin sản phẩm: @infoProduct?.Name</h5>
+
+            @if (infoLoading)
+            {
+                <LoadingSpinner />
+            }
+            else if (infoProduct != null)
+            {
+                <table class="table table-bordered">
+                    <tbody>
+                        <tr>
+                            <th>Người tạo (Owner)</th>
+                            <td>@infoOwnerEmail</td>
+                        </tr>
+                        <tr>
+                            <th>Người cập nhật cuối</th>
+                            <td>@infoLastUpdatedEmail</td>
+                        </tr>
+                        <tr>
+                            <th>Ngày tạo</th>
+                            <td>@infoProduct.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                        </tr>
+                        <tr>
+                            <th>Ngày cập nhật cuối</th>
+                            <td>@(infoProduct.UpdatedAt?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "Chưa cập nhật")</td>
+                        </tr>
+                    </tbody>
+                </table>
+            }
+
+            <div class="text-end">
+                <button class="btn btn-secondary" @onclick="CloseInfoModal">Đóng</button>
+            </div>
+        </div>
+    </div>
+}
+
+
+<style>
+.table-fixed { table-layout: fixed; }
+.product-name { display:block; max-width:100%; white-space:normal; word-break:break-word; overflow-wrap:anywhere; }
+.product-name-btn { display:block; width:100%; text-align:left; background:transparent; border:none; padding:0; margin:0; font-weight:600; color:inherit; white-space:normal; word-break:break-word; overflow-wrap:anywhere; }
+.text-nowrap { white-space: nowrap; }
+.modal-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:2000; }
+.modal-content-custom { position: relative; background: #fff; padding:1.25rem; border-radius:8px; max-width: 900px; width:90%; max-height:90vh; overflow:auto; text-align:left; box-shadow:0 8px 24px rgba(0,0,0,0.2); }
+.modal-img { max-width:100%; max-height:70vh; object-fit:contain; border:1px solid #e9ecef; border-radius:6px; }
+.btn-close-modal { position:absolute; top:0.5rem; right:0.75rem; font-size:1.5rem; line-height:1; background:transparent; border:none; color:#333; }
+.table-responsive { overflow-x:auto; }
+.table-fixed { table-layout: fixed; }
+
+/* Tên sản phẩm cho phép xuống dòng */
+.product-name {
+    display: block;
+    max-width: 100%;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+
+/* Button hiển thị tên - đầy đủ, không có border */
+.product-name-btn {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font-weight: 600;
+    color: inherit;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+
+/* Giá không xuống dòng và canh phải */
+.text-nowrap { white-space: nowrap; }
+
+/* ---------------- Modal styles ---------------- */
+
+/* Modal overlay */
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+
+/* Modal content: rộng hơn, cho phép cuộn ngang nếu cần */
+.modal-content-custom {
+    max-width: 1100px;
+    width: 92%;
+    overflow-x: auto;
+    position: relative;
+    background: #fff;
+    padding: 1.25rem;
+    border-radius: 8px;
+    max-height: 90vh;
+    overflow-y: auto;
+    text-align: left;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+}
+
+/* Ảnh trong modal */
+.modal-img {
+    max-width: 100%;
+    max-height: 70vh;
+    object-fit: contain;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+}
+
+/* Nút đóng modal */
+.btn-close-modal {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.75rem;
+    font-size: 1.5rem;
+    line-height: 1;
+    background: transparent;
+    border: none;
+    color: #333;
+}
+
+/* Bảng trong modal: min-width để tránh bị chồng chéo cột */
+.modal-content-custom .table {
+    width: 100%;
+    min-width: 760px; /* tăng nếu cần nhiều cột hơn */
+    table-layout: auto;
+}
+
+/* Tăng padding ô để khoảng cách cột rộng hơn */
+.modal-content-custom .table th,
+.modal-content-custom .table td {
+    padding: 0.85rem 1.0rem;
+    vertical-align: middle;
+    white-space: nowrap;         /* desktop: không xuống dòng */
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+/* Tiêu đề bảng đậm */
+.modal-content-custom .table th { font-weight: 600; }
+
+/* Cột đầu cho phép xuống dòng (tên, mô tả..) */
+.modal-content-custom .table td:first-child,
+.modal-content-custom .table th:first-child {
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+
+/* Cho phép cuộn ngang trong container khi quá hẹp */
+.table-responsive {
+    overflow-x: auto;
+}
+
+/* ---------------- Responsive: mobile ---------------- */
+@@media (max-width: 768px) {
+    .modal-content-custom {
+        max-width: 96%;
+        width: 96%;
+    }
+    .modal-content-custom .table {
+        min-width: 480px;
+    }
+    .modal-content-custom .table th,
+    .modal-content-custom .table td {
+        white-space: normal; /* mobile: cho phép xuống dòng */
+    }
+}
+</style>
+
+@code {
+    // Paging & data
+    private IEnumerable<Product> pagedProducts = new List<Product>();
+    private string? searchTerm;
+    [Parameter] public int? page { get; set; }
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private int totalPages = 1;
+    private int totalItems = 0;
+
+    // aggregates
+    private Dictionary<int, int> incomingDict = new();
+    private Dictionary<int, int> outgoingDict = new();
+    private Dictionary<int, int> returnsDict = new();
+    private Dictionary<int, int> adjustmentsDict = new();
+
+    // modals and lists
+    private bool showImageModal;
+    private string? modalImageUrl;
+    private string? modalProductName;
+
+    private bool showIncomingModal; private List<PurchaseOrder>? incomingPOs; private bool incomingLoading;
+    private bool showOutgoingModal; private List<Order>? outgoingOrders; private bool outgoingLoading;
+    private bool showReturnsModal; private List<ReturnReceipt>? returnReceipts; private bool returnsLoading;
+    private bool showAdjustmentsModal; private List<InventoryAdjustmentRequest>? adjustmentRequests; private bool adjustmentsLoading;
+
+    private Product? currentProduct;
+    private bool showInfoModal;
+private bool infoLoading;
+private Product? infoProduct;
+private string? infoOwnerEmail;
+private string? infoLastUpdatedEmail;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        currentPage = page.HasValue && page.Value > 0 ? page.Value : 1;
+        await LoadProducts();
+    }
+
+    private async Task RefreshPage()
+    {
+        await LoadProducts();
+    }
+
+    private async Task LoadProducts()
+    {
+        if (currentPage < 1) currentPage = 1;
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        IQueryable<Product> query = db.Products.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+        {
+            var pattern = $"%{searchTerm.Trim()}%";
+            query = query.Where(p => EF.Functions.Like(p.Name, pattern));
+        }
+
+        query = query.OrderByDescending(p => p.Id);
+
+        totalItems = await query.CountAsync();
+        totalPages = Math.Max(1, (int)Math.Ceiling(totalItems / (double)pageSize));
+        if (currentPage > totalPages) currentPage = totalPages;
+
+        pagedProducts = await query.Skip((currentPage - 1) * pageSize).Take(pageSize).ToListAsync();
+
+        await LoadAggregates(pagedProducts.Select(p => p.Id).ToArray());
+    }
+
+    private async Task LoadAggregates(int[] pids)
+    {
+        incomingDict = new(); outgoingDict = new(); returnsDict = new(); adjustmentsDict = new();
+        if (pids == null || pids.Length == 0) return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        // 1) incoming — join PurchaseOrders + PurchaseOrderItems, include statuses often used
+        var incomingStatuses = new[] { "Đã đặt hàng", "Chờ phê duyệt" };
+        // we also want statuses starting with "Bị từ chối" => include those
+        var incQuery = from po in db.PurchaseOrders
+                       join it in db.PurchaseOrderItems on po.Id equals it.PurchaseOrderId
+                       where pids.Contains(it.ProductId) &&
+                             (incomingStatuses.Contains(po.Status) || po.Status.StartsWith("Bị từ chối"))
+                       group it by it.ProductId into g
+                       select new { ProductId = g.Key, Total = g.Sum(x => x.Quantity) };
+
+        var inc = await incQuery.ToListAsync();
+        incomingDict = inc.ToDictionary(x => x.ProductId, x => x.Total);
+
+        // 2) outgoing — orders in statuses
+        var orderStatuses = new[] { "Chờ xác nhận", "Chờ thanh toán", "Đã thanh toán" };
+        var outQuery = from o in db.Orders
+                       where orderStatuses.Contains(o.Status)
+                       from od in o.OrderDetails
+                       where pids.Contains(od.ProductId)
+                       group od by od.ProductId into g
+                       select new { ProductId = g.Key, Total = g.Sum(x => x.Quantity) };
+
+        var outRes = await outQuery.ToListAsync();
+        outgoingDict = outRes.ToDictionary(x => x.ProductId, x => x.Total);
+
+        // 3) returns — ReturnReceipts with statuses
+        var returnStatuses = new[] { "Đã đặt hàng", "Chờ phê duyệt" };
+        var retQuery = from rr in db.ReturnReceipts
+                       where returnStatuses.Contains(rr.Status)
+                       from it in rr.Items
+                       where pids.Contains(it.ProductId)
+                       group it by it.ProductId into g
+                       select new { ProductId = g.Key, Total = g.Sum(x => x.Quantity) };
+
+        var retRes = await retQuery.ToListAsync();
+        returnsDict = retRes.ToDictionary(x => x.ProductId, x => x.Total);
+
+        // 4) adjustments (Pending)
+        var adjQuery = from r in db.InventoryAdjustmentRequests
+                       where r.Status == "Pending" && pids.Contains(r.ProductId)
+                       group r by r.ProductId into g
+                       select new { ProductId = g.Key, Total = g.Sum(x => (x.RequestedQuantity - x.OldQuantity)) };
+
+        var adjRes = await adjQuery.ToListAsync();
+        adjustmentsDict = adjRes.ToDictionary(x => x.ProductId, x => x.Total);
+    }
+
+    private async Task SearchProducts()
+    {
+        currentPage = 1;
+        await LoadProducts();
+    }
+
+    private async Task ClearSearch()
+    {
+        searchTerm = null;
+        currentPage = 1;
+        await LoadProducts();
+    }
+
+    private Task GoBack()
+    {
+        Navigation.NavigateTo("/admin");
+        return Task.CompletedTask;
+    }
+
+    // ---------- Image modal ----------
+    private void ShowImage(Product product)
+    {
+        modalProductName = product.Name;
+        modalImageUrl = product.ImageUrl ?? "/images/no-image.png";
+        showImageModal = true;
+    }
+    private void CloseImageModal() => showImageModal = false;
+
+    // ---------- Incoming modal ----------
+    private async Task ShowIncoming(int productId)
+    {
+        incomingLoading = true;
+        incomingPOs = new List<PurchaseOrder>();
+        showIncomingModal = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            incomingPOs = await db.PurchaseOrders
+                .Include(po => po.Supplier)
+                .Include(po => po.Items).ThenInclude(i => i.Product)
+                .Where(po => (po.Status == "Đã đặt hàng" || po.Status == "Chờ phê duyệt" || po.Status.StartsWith("Bị từ chối"))
+                             && po.Items.Any(i => i.ProductId == productId))
+                .OrderByDescending(po => po.OrderDate)
+                .ToListAsync();
+
+            currentProduct = await db.Products.AsNoTracking().FirstOrDefaultAsync(p => p.Id == productId);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("ShowIncoming error: " + ex);
+            ToastSvc.ShowToast("Lỗi khi tải phiếu nhập.", ToastLevel.Error);
+        }
+        finally { incomingLoading = false; }
+    }
+    private void CloseIncomingModal() { showIncomingModal = false; incomingPOs = null; }
+
+    // ---------- Outgoing modal ----------
+    private async Task ShowOutgoing(int productId)
+    {
+        outgoingLoading = true;
+        outgoingOrders = new List<Order>();
+        showOutgoingModal = true;
+        try
+        {
+            var statuses = new[] { "Chờ xác nhận", "Chờ thanh toán", "Đã thanh toán" };
+            await using var db = await DbFactory.CreateDbContextAsync();
+            outgoingOrders = await db.Orders
+                .Include(o => o.OrderDetails)
+                .Where(o => statuses.Contains(o.Status) && o.OrderDetails.Any(od => od.ProductId == productId))
+                .OrderByDescending(o => o.OrderDate)
+                .ToListAsync();
+
+            currentProduct = await db.Products.AsNoTracking().FirstOrDefaultAsync(p => p.Id == productId);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("ShowOutgoing error: " + ex);
+            ToastSvc.ShowToast("Lỗi khi tải đơn hàng.", ToastLevel.Error);
+        }
+        finally { outgoingLoading = false; }
+    }
+    private void CloseOutgoingModal() { showOutgoingModal = false; outgoingOrders = null; }
+
+    // ---------- Returns modal ----------
+    private async Task ShowReturns(int productId)
+    {
+        returnsLoading = true;
+        returnReceipts = new List<ReturnReceipt>();
+        showReturnsModal = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            returnReceipts = await db.ReturnReceipts
+                .Include(rr => rr.Items).ThenInclude(i => i.Product)
+                .Where(rr => (rr.Status == "Đã đặt hàng" || rr.Status == "Chờ phê duyệt") && rr.Items.Any(i => i.ProductId == productId))
+                .OrderByDescending(rr => rr.CreatedAt)
+                .ToListAsync();
+
+            currentProduct = await db.Products.AsNoTracking().FirstOrDefaultAsync(p => p.Id == productId);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("ShowReturns error: " + ex);
+            ToastSvc.ShowToast("Lỗi khi tải phiếu nhập hoàn.", ToastLevel.Error);
+        }
+        finally { returnsLoading = false; }
+    }
+    private void CloseReturnsModal() { showReturnsModal = false; returnReceipts = null; }
+
+    // ---------- Adjustments modal ----------
+    private async Task ShowAdjustments(int productId)
+    {
+        adjustmentsLoading = true;
+        adjustmentRequests = new List<InventoryAdjustmentRequest>();
+        showAdjustmentsModal = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            adjustmentRequests = await db.InventoryAdjustmentRequests
+                .Where(r => r.Status == "Pending" && r.ProductId == productId)
+                .OrderByDescending(r => r.RequestedAt)
+                .ToListAsync();
+
+            currentProduct = await db.Products.AsNoTracking().FirstOrDefaultAsync(p => p.Id == productId);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("ShowAdjustments error: " + ex);
+            ToastSvc.ShowToast("Lỗi khi tải yêu cầu điều chỉnh.", ToastLevel.Error);
+        }
+        finally { adjustmentsLoading = false; }
+    }
+    private void CloseAdjustmentsModal() { showAdjustmentsModal = false; adjustmentRequests = null; }
+
+    // ---------- Utilities ----------
+    private async Task ToggleVisibility(int productId)
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var prod = await db.Products.FirstOrDefaultAsync(p => p.Id == productId);
+            if (prod == null) { ToastSvc.ShowToast("Sản phẩm không tồn tìm", ToastLevel.Warning); return; }
+            prod.IsVisible = !prod.IsVisible;
+            db.Products.Update(prod);
+            await db.SaveChangesAsync();
+            await LoadProducts();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("ToggleVisibility error: " + ex);
+            ToastSvc.ShowToast("Lỗi khi thay đổi ẩn/hiện.", ToastLevel.Error);
+        }
+    }
+
+    // ---------------- Delete logic: only allow when all columns = 0 ----------------
+
+    // Ensure aggregates for a specific product are loaded (reload)
+    private async Task EnsureAggregatesForProductAsync(int productId)
+    {
+        await LoadAggregates(new[] { productId });
+    }
+
+    // ConfirmDelete: check condition before showing confirm
+    private async Task ConfirmDelete(int productId, string? productName)
+    {
+        // Refresh aggregates for this product to ensure latest values
+        await EnsureAggregatesForProductAsync(productId);
+
+        // Get product stock
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var prod = await db.Products.AsNoTracking().FirstOrDefaultAsync(p => p.Id == productId);
+        if (prod == null)
+        {
+            ToastSvc.ShowToast("Sản phẩm không tìm thấy", ToastLevel.Warning);
+            return;
+        }
+
+        // Get aggregates (default 0 if missing)
+        incomingDict.TryGetValue(productId, out var inc);
+        outgoingDict.TryGetValue(productId, out var outg);
+        returnsDict.TryGetValue(productId, out var ret);
+        adjustmentsDict.TryGetValue(productId, out var adj);
+
+        // Require all zero
+        if (prod.StockQuantity != 0 || inc != 0 || outg != 0 || ret != 0 || adj != 0)
+        {
+            var reasons = new List<string>();
+            if (prod.StockQuantity != 0) reasons.Add($"Tồn kho = {prod.StockQuantity}");
+            if (inc != 0) reasons.Add($"Số lượng nhập mới = {inc}");
+            if (outg != 0) reasons.Add($"Số lượng xuất = {outg}");
+            if (ret != 0) reasons.Add($"Số lượng nhập hoàn = {ret}");
+            if (adj != 0) reasons.Add($"Số lượng điều chỉnh = {adj}");
+
+            var details = reasons.Any() ? string.Join("; ", reasons) : "Có dữ liệu chưa bằng 0";
+            ToastSvc.ShowToast($"Không thể xóa sản phẩm \"{productName}\". Vui lòng đảm bảo tất cả giá trị bằng 0. ({details})", ToastLevel.Warning);
+            return;
+        }
+
+        // All zero -> ask confirm and delete
+        if (!await ShowConfirm($"Bạn có chắc muốn xoá sản phẩm \"{productName}\"?")) return;
+        await DeleteProduct(productId);
+    }
+
+    // DeleteProduct: final re-check then delete
+    private async Task DeleteProduct(int productId)
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var prod = await db.Products.FirstOrDefaultAsync(p => p.Id == productId);
+            if (prod == null)
+            {
+                ToastSvc.ShowToast("Sản phẩm không tìm thấy", ToastLevel.Warning);
+                return;
+            }
+
+            // Final re-check to avoid race conditions
+            await EnsureAggregatesForProductAsync(productId);
+            incomingDict.TryGetValue(productId, out var inc);
+            outgoingDict.TryGetValue(productId, out var outg);
+            returnsDict.TryGetValue(productId, out var ret);
+            adjustmentsDict.TryGetValue(productId, out var adj);
+
+            if (prod.StockQuantity != 0 || inc != 0 || outg != 0 || ret != 0 || adj != 0)
+            {
+                ToastSvc.ShowToast("Không thể xóa — dữ liệu đã thay đổi. Vui lòng làm mới trang và thử lại.", ToastLevel.Warning);
+                return;
+            }
+
+            db.Products.Remove(prod);
+            await db.SaveChangesAsync();
+            ToastSvc.ShowToast("Đã xóa sản phẩm.", ToastLevel.Success);
+            await LoadProducts();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("DeleteProduct error: " + ex);
+            ToastSvc.ShowToast("Lỗi khi xóa sản phẩm.", ToastLevel.Error);
+        }
+    }
+
+    private async Task<bool> ShowConfirm(string message)
+    {
+        try { return await JS.InvokeAsync<bool>("confirm", message); }
+        catch { return false; }
+    }
+    private async Task ShowProductInfo(Product product)
+{
+    showInfoModal = true;
+    infoLoading = true;
+    infoProduct = null;
+    infoOwnerEmail = "Không có";
+    infoLastUpdatedEmail = "Không có";
+
+    try
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        infoProduct = await db.Products
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == product.Id);
+
+        // Load Owner email
+        if (!string.IsNullOrEmpty(infoProduct?.OwnerId))
+        {
+            var owner = await db.Users.FirstOrDefaultAsync(u => u.Id == infoProduct.OwnerId);
+            infoOwnerEmail = owner?.Email ?? infoProduct.OwnerId;
+        }
+
+        // Load người cập nhật cuối
+        if (!string.IsNullOrEmpty(infoProduct?.LastUpdatedById))
+        {
+            var updater = await db.Users.FirstOrDefaultAsync(u => u.Id == infoProduct.LastUpdatedById);
+            infoLastUpdatedEmail = updater?.Email ?? infoProduct.LastUpdatedById;
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine("ShowProductInfo Error: " + ex);
+        ToastSvc.ShowToast("Lỗi khi tải thông tin sản phẩm.", ToastLevel.Error);
+    }
+    finally
+    {
+        infoLoading = false;
+    }
+}
+
+private void CloseInfoModal()
+{
+    showInfoModal = false;
+    infoProduct = null;
+}
+
+}

@@ -1,0 +1,325 @@
+@page "/admin/shipments/create/{OrderId:int}"
+@attribute [Authorize(Roles = "Admin, Logistics")]
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Forms
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Navigation
+@inject ToastService ToastSvc
+@inject IJSRuntime JS
+
+<h3>Tạo Vận đơn cho Đơn hàng #@OrderId</h3>
+
+@if (isLoading)
+{
+    <LoadingSpinner />
+}
+else if (order == null)
+{
+    <div class="alert alert-warning">Không tìm thấy đơn hàng với ID này.</div>
+}
+else
+{
+    @if (existingShipment != null)
+    {
+        <div class="alert alert-info">
+            Đơn này đã có vận đơn: <strong>@existingShipment.TrackingNumber</strong>
+        </div>
+
+        <div class="card mb-3">
+            <div class="card-body">
+                <p><strong>Provider:</strong> @existingShipment.ShippingProvider</p>
+                <p><strong>Tracking:</strong> @existingShipment.TrackingNumber</p>
+                <p><strong>Ngày tạo:</strong> @(existingShipment.GetType().GetProperty("CreatedAt")?.GetValue(existingShipment) ?? "(không có)")</p>
+            </div>
+            <div class="card-footer">
+                <a class="btn btn-primary" href="@($"/admin/shipments/{existingShipment.Id}")">Xem vận đơn</a>
+                <button class="btn btn-warning ms-2" @onclick="ConfirmRecreate">Tạo lại vận đơn (Xoá cũ)</button>
+                <button class="btn btn-danger ms-2" @onclick="ConfirmDelete">Xoá vận đơn</button>
+                <button class="btn btn-secondary ms-2" @onclick="Cancel">Hủy</button>
+            </div>
+        </div>
+    }
+    else
+    {
+        <EditForm EditContext="@editContext" OnValidSubmit="HandleCreateShipment" OnInvalidSubmit="HandleInvalid">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="card">
+                <div class="card-body">
+                    <p><strong>Khách hàng:</strong> @order.CustomerName</p>
+                    <p><strong>Địa chỉ giao:</strong> @order.ShippingAddress</p>
+                    <hr />
+                    <div class="form-group mb-3">
+                        <label>Đơn vị vận chuyển</label>
+                        <InputText class="form-control" @bind-Value="newShipment.ShippingProvider" placeholder="VD: Giao hàng tiết kiệm" />
+                    </div>
+                    <div class="form-group mb-3">
+                        <label>Mã vận đơn (Tracking Number)</label>
+                        <InputText class="form-control" @bind-Value="newShipment.TrackingNumber" />
+                    </div>
+                </div>
+
+                <div class="card-footer">
+                    <button type="submit" class="btn btn-success" disabled="@isSubmitting">Xác nhận và Giao hàng</button>
+                    <button type="button" class="btn btn-secondary ms-2" @onclick="Cancel">Hủy</button>
+                </div>
+            </div>
+        </EditForm>
+    }
+}
+
+@code {
+    [Parameter] public int OrderId { get; set; }
+
+    private Order? order;
+    private Shipment newShipment = new();
+    private Shipment? existingShipment;
+    private bool isLoading = true;
+    private bool isSubmitting = false;
+    private EditContext? editContext;
+
+    protected override async Task OnInitializedAsync()
+    {
+        isLoading = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            // Load order and any existing shipment (read-only)
+            order = await db.Orders.AsNoTracking().FirstOrDefaultAsync(o => o.Id == OrderId);
+            if (order != null)
+            {
+                existingShipment = await db.Shipments.AsNoTracking().FirstOrDefaultAsync(s => s.OrderId == OrderId);
+            }
+            Console.WriteLine($"[ShipmentCreate] OnInitialized: orderId={OrderId}, orderStatus={(order?.Status ?? "null")}, existingShipmentId={(existingShipment?.Id.ToString() ?? "none")}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[ShipmentCreate] Error OnInitialized: " + ex);
+        }
+        finally
+        {
+            editContext = new EditContext(newShipment);
+            isLoading = false;
+        }
+    }
+
+    private void Cancel() => Navigation.NavigateTo("/admin/logistics");
+
+    private void HandleInvalid(EditContext ctx)
+    {
+        ToastSvc.ShowToast("Vui lòng kiểm tra lại thông tin.", ToastLevel.Warning);
+    }
+
+    private async Task HandleCreateShipment()
+    {
+        if (order == null) return;
+
+        if (editContext != null && !editContext.Validate())
+        {
+            ToastSvc.ShowToast("Dữ liệu không hợp lệ.", ToastLevel.Warning);
+            return;
+        }
+
+        isSubmitting = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await using var tx = await db.Database.BeginTransactionAsync();
+
+            try
+            {
+                Console.WriteLine($"[ShipmentCreate] BEGIN create shipment for order {order.Id}. NewShipment: Provider={newShipment.ShippingProvider}, Tracking={newShipment.TrackingNumber}");
+
+                // Double-check no existing shipment in this DB context (avoid race)
+                var already = await db.Shipments.FirstOrDefaultAsync(s => s.OrderId == order.Id);
+                if (already != null)
+                {
+                    Console.WriteLine("[ShipmentCreate] Found existing shipment in DB during create; redirecting.");
+                    ToastSvc.ShowToast("Đơn đã có vận đơn.", ToastLevel.Info);
+                    await tx.RollbackAsync();
+                    Navigation.NavigateTo($"/admin/shipments/{already.Id}", true);
+                    return;
+                }
+
+                // Prepare shipment
+                newShipment.OrderId = order.Id;
+                var prop = newShipment.GetType().GetProperty("CreatedAt");
+                if (prop != null && prop.PropertyType == typeof(DateTime))
+                    prop.SetValue(newShipment, DateTime.UtcNow);
+
+                db.Shipments.Add(newShipment);
+
+                // Update order status to "Đang giao"
+                var orderToUpdate = await db.Orders.FirstOrDefaultAsync(o => o.Id == order.Id);
+                if (orderToUpdate != null)
+                {
+                    Console.WriteLine($"[ShipmentCreate] Before update: OrderId={orderToUpdate.Id}, Status={orderToUpdate.Status}");
+                    orderToUpdate.Status = "Đang giao";
+                    db.Orders.Update(orderToUpdate);
+                }
+
+                Console.WriteLine("[ShipmentCreate] Calling SaveChangesAsync()");
+                var affected = await db.SaveChangesAsync();
+                Console.WriteLine($"[ShipmentCreate] SaveChangesAsync() completed. Rows affected: {affected}");
+
+                // Verify saved order status directly from DB
+                var savedOrder = await db.Orders.AsNoTracking().FirstOrDefaultAsync(o => o.Id == order.Id);
+                Console.WriteLine($"[ShipmentCreate] After SaveChanges, DB order status = {(savedOrder?.Status ?? "null")}");
+
+                await tx.CommitAsync();
+                Console.WriteLine("[ShipmentCreate] Transaction committed.");
+
+                ToastSvc.ShowToast($"✅ Đã tạo vận đơn cho đơn #{order.Id}. Trạng thái đơn: Đang giao", ToastLevel.Success);
+
+                // Force full reload of the list page to guarantee fresh data
+                Navigation.NavigateTo("/admin/logistics", forceLoad: true);
+            }
+            catch (DbUpdateException dbEx)
+            {
+                try { await tx.RollbackAsync(); } catch { }
+                var isDuplicate = dbEx.InnerException is Microsoft.Data.SqlClient.SqlException sqlEx &&
+                                  (sqlEx.Number == 2601 || sqlEx.Number == 2627);
+                if (isDuplicate)
+                {
+                    var existed = await db.Shipments.AsNoTracking().FirstOrDefaultAsync(s => s.OrderId == order.Id);
+                    if (existed != null)
+                    {
+                        ToastSvc.ShowToast("Đã có vận đơn cho đơn này (đã được tạo bởi người khác).", ToastLevel.Info);
+                        Navigation.NavigateTo($"/admin/shipments/{existed.Id}", true);
+                        return;
+                    }
+                }
+
+                Console.WriteLine("[ShipmentCreate] DbUpdateException: " + dbEx);
+                ToastSvc.ShowToast("Có lỗi khi tạo vận đơn. Vui lòng thử lại.", ToastLevel.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[ShipmentCreate] Exception in HandleCreateShipment: " + ex);
+            ToastSvc.ShowToast("Có lỗi không xác định. Xem console để debug.", ToastLevel.Error);
+        }
+        finally
+        {
+            isSubmitting = false;
+        }
+    }
+
+    private async Task ConfirmRecreate()
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", "Bạn có chắc muốn TẠO LẠI vận đơn? Vận đơn cũ sẽ bị xóa (mất lịch sử).");
+        if (!ok) return;
+        await RecreateShipment();
+    }
+
+    private async Task RecreateShipment()
+    {
+        if (order == null || existingShipment == null) return;
+
+        isSubmitting = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await using var tx = await db.Database.BeginTransactionAsync();
+
+            try
+            {
+                Console.WriteLine($"[ShipmentCreate] Recreate: deleting old shipment id={existingShipment.Id}");
+
+                var old = await db.Shipments.FirstOrDefaultAsync(s => s.Id == existingShipment.Id);
+                if (old != null)
+                {
+                    db.Shipments.Remove(old);
+                    await db.SaveChangesAsync();
+                    Console.WriteLine("[ShipmentCreate] Old shipment deleted.");
+                }
+
+                var created = new Shipment
+                {
+                    OrderId = order.Id,
+                    ShippingProvider = existingShipment.ShippingProvider,
+                    TrackingNumber = existingShipment.TrackingNumber
+                };
+                var prop = created.GetType().GetProperty("CreatedAt");
+                if (prop != null && prop.PropertyType == typeof(DateTime))
+                    prop.SetValue(created, DateTime.UtcNow);
+
+                db.Shipments.Add(created);
+
+                var orderToUpdate = await db.Orders.FirstOrDefaultAsync(o => o.Id == order.Id);
+                if (orderToUpdate != null)
+                {
+                    orderToUpdate.Status = "Đang giao";
+                    db.Orders.Update(orderToUpdate);
+                }
+
+                var affected = await db.SaveChangesAsync();
+                Console.WriteLine($"[ShipmentCreate] Recreate SaveChanges affected={affected}");
+
+                var savedOrder = await db.Orders.AsNoTracking().FirstOrDefaultAsync(o => o.Id == order.Id);
+                Console.WriteLine($"[ShipmentCreate] After recreate, DB order status = {(savedOrder?.Status ?? "null")}");
+
+                await tx.CommitAsync();
+
+                ToastSvc.ShowToast($"✅ Đã tạo lại vận đơn cho đơn #{order.Id}. Trạng thái đơn: Đang giao", ToastLevel.Success);
+                Navigation.NavigateTo("/admin/logistics", forceLoad: true);
+            }
+            catch (Exception ex)
+            {
+                try { await tx.RollbackAsync(); } catch { }
+                Console.WriteLine("[ShipmentCreate] Recreate error: " + ex);
+                ToastSvc.ShowToast("Có lỗi khi tạo lại vận đơn.", ToastLevel.Error);
+            }
+        }
+        finally
+        {
+            isSubmitting = false;
+        }
+    }
+
+    private async Task ConfirmDelete()
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", "Bạn có chắc muốn XOÁ vận đơn này?");
+        if (!ok) return;
+        await DeleteShipment();
+    }
+
+    private async Task DeleteShipment()
+    {
+        if (existingShipment == null) return;
+
+        isSubmitting = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var toDelete = await db.Shipments.FirstOrDefaultAsync(s => s.Id == existingShipment.Id);
+            if (toDelete != null)
+            {
+                db.Shipments.Remove(toDelete);
+
+                var orderToUpdate = await db.Orders.FirstOrDefaultAsync(o => o.Id == order.Id);
+                if (orderToUpdate != null)
+                {
+                    orderToUpdate.Status = "Sẵn sàng giao hàng";
+                    db.Orders.Update(orderToUpdate);
+                }
+
+                var affected = await db.SaveChangesAsync();
+                Console.WriteLine($"[ShipmentCreate] Delete SaveChanges affected={affected}");
+
+                ToastSvc.ShowToast("Đã xoá vận đơn.", ToastLevel.Success);
+            }
+            Navigation.NavigateTo("/admin/logistics", forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[ShipmentCreate] Delete error: " + ex);
+            ToastSvc.ShowToast("Có lỗi khi xoá vận đơn.", ToastLevel.Error);
+        }
+        finally
+        {
+            isSubmitting = false;
+        }
+    }
+}

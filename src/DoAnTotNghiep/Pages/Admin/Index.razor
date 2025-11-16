@@ -1,0 +1,574 @@
+@page "/admin"
+@attribute [Authorize(Roles = "Admin, Sales, Warehouse, Logistics, Purchasing")]
+@using Microsoft.EntityFrameworkCore
+@using DoAnTotNghiep.Models
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+
+@* Import shared component namespace nếu bạn đã tạo FeatureCard trong thư mục Shared *@
+@using DoAnTotNghiep.Shared
+
+<style>
+/* Simple modal styles */
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+.modal-panel {
+    background: #fff;
+    border-radius: 8px;
+    max-width: 1000px;
+    width: 92%;
+    max-height: 85vh;
+    overflow: auto;
+    padding: 1rem;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+.modal-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem; }
+.modal-body { margin-top:0.5rem; }
+.modal-footer { margin-top:1rem; text-align:right; }
+.modal-close-btn { font-size:1.1rem; background:transparent; border:none; }
+.kpi-card-btn { display:block; text-decoration:none; color:inherit; }
+</style>
+
+<div class="admin-modern container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="mb-1">Trang Quản trị</h2>
+            <div class="text-muted">Chào mừng đến khu vực quản lý nội bộ.</div>
+        </div>
+
+        <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="Refresh" disabled="@isLoading">
+                <i class="bi bi-arrow-clockwise me-1"></i> Làm mới
+            </button>
+            <a class="btn btn-primary btn-sm" href="/admin/dashboard">Dashboard</a>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="text-center py-5">
+            <LoadingSpinner />
+        </div>
+    }
+    else
+    {
+        <!-- KPI row -->
+        <div class="row g-3 mb-4">
+            <div class="col-6 col-md-3">
+                <!-- Products: open modal -->
+                <button class="kpi-card-btn btn p-0" @onclick="OpenProductsModal" title="Quản lý Sản phẩm">
+                    <div class="kpi card p-3">
+                        <div class="d-flex align-items-center">
+                            <div class="kpi-icon me-3 icon-bg-primary"><i class="bi bi-tag"></i></div>
+                            <div>
+                                <div class="text-muted small">Sản phẩm</div>
+                                <div class="h5 mb-0">@productsCount</div>
+                                <small class="text-muted">Tổng sản phẩm</small>
+                            </div>
+                        </div>
+                    </div>
+                </button>
+            </div>
+
+            <div class="col-6 col-md-3">
+                <!-- Orders pending: open modal with filter not completed -->
+                <button class="kpi-card-btn btn p-0" @onclick="OpenOrdersModal" title="Đơn hàng cần xử lý">
+                    <div class="kpi card p-3">
+                        <div class="d-flex align-items-center">
+                            <div class="kpi-icon me-3 icon-bg-warning"><i class="bi bi-cart-check"></i></div>
+                            <div>
+                                <div class="text-muted small">Đơn hàng cần xử lý</div>
+                                <div class="h5 mb-0">@ordersPendingCount</div>
+                                <small class="text-muted">Chưa hoàn tất</small>
+                            </div>
+                        </div>
+                    </div>
+                </button>
+            </div>
+
+            <div class="col-6 col-md-3">
+                <!-- Purchase Orders pending -->
+                <button class="kpi-card-btn btn p-0" @onclick="OpenPurchaseOrdersModal" title="Phiếu nhập chờ">
+                    <div class="kpi card p-3">
+                        <div class="d-flex align-items-center">
+                            <div class="kpi-icon me-3 icon-bg-success"><i class="bi bi-box-arrow-in-down"></i></div>
+                            <div>
+                                <div class="text-muted small">Phiếu nhập chờ</div>
+                                <div class="h5 mb-0">@poPendingCount</div>
+                                <small class="text-muted">Chưa về 'Đã nhận hàng'</small>
+                            </div>
+                        </div>
+                    </div>
+                </button>
+            </div>
+
+            <div class="col-6 col-md-3">
+                <!-- Return Receipts pending -->
+                <button class="kpi-card-btn btn p-0" @onclick="OpenReturnReceiptsModal" title="Phiếu thu hồi">
+                    <div class="kpi card p-3">
+                        <div class="d-flex align-items-center">
+                            <div class="kpi-icon me-3 icon-bg-danger"><i class="bi bi-arrow-repeat"></i></div>
+                            <div>
+                                <div class="text-muted small">Phiếu thu hồi</div>
+                                <div class="h5 mb-0">@rrPendingCount</div>
+                                <small class="text-muted">Chưa về 'Đã nhận hàng'</small>
+                            </div>
+                        </div>
+                    </div>
+                </button>
+            </div>
+        </div>
+
+        <!-- Feature cards using FeatureCard component (keeps all links/roles) -->
+        <div class="row g-3 mb-4">
+            <div class="col-sm-6 col-lg-4">
+                <AuthorizeView Roles="Admin">
+                    <FeatureCard Title="Quản trị hệ thống" Subtitle="Các chức năng chỉ Admin mới thấy"
+                                 IconClass="bi bi-shield-lock" IconBgClass="icon-bg-admin" PrimaryText="Quản lý Tickets"
+                                 PrimaryLink="/admin/tickets" SecondaryText="Quản lý Sản phẩm" SecondaryLink="/admin/products"
+                                 Badge="@string.Empty" />
+                </AuthorizeView>
+            </div>
+
+            <div class="col-sm-6 col-lg-4">
+                <AuthorizeView Roles="Admin">
+                    <FeatureCard Title="Danh mục" Subtitle="Quản lý danh mục sản phẩm" IconClass="bi bi-tags"
+                                 IconBgClass="icon-bg-categories" PrimaryText="Quản lý Danh mục" PrimaryLink="/admin/categories"
+                                 SecondaryText="Thêm mới" SecondaryLink="/admin/categories/add" />
+                </AuthorizeView>
+            </div>
+
+            <div class="col-sm-6 col-lg-4">
+                <AuthorizeView Roles="Admin">
+                    <FeatureCard Title="Quản lý Người dùng" Subtitle="Tạo / quản lý tài khoản và quyền"
+                                 IconClass="bi bi-people" IconBgClass="icon-bg-users" PrimaryText="Quản lý Người dùng"
+                                 PrimaryLink="/admin/users" SecondaryText="Thêm tài khoản" SecondaryLink="/admin/users/create" />
+                </AuthorizeView>
+            </div>
+
+            <div class="col-sm-6 col-lg-4">
+                <AuthorizeView Roles="Admin, Sales, Warehouse, Logistics">
+                    <FeatureCard Title="Quản lý Đơn hàng" Subtitle="Xem & xử lý toàn bộ đơn hàng"
+                                 IconClass="bi bi-card-list" IconBgClass="icon-bg-orders" PrimaryText="Quản lý Đơn hàng"
+                                 PrimaryLink="/admin/orders" SecondaryText="Xem Bảng điều khiển"
+                                 SecondaryLink="/admin/dashboard" />
+                </AuthorizeView>
+            </div>
+
+            <div class="col-sm-6 col-lg-4">
+                <AuthorizeView Roles="Admin, Purchasing">
+                    <FeatureCard Title="Mua hàng" Subtitle="Nhà cung cấp & Đơn nhập" IconClass="bi bi-building"
+                                 IconBgClass="icon-bg-purchasing" PrimaryText="Nhà cung cấp" PrimaryLink="/admin/suppliers"
+                                 SecondaryText="Đơn nhập" SecondaryLink="/admin/purchase-orders" />
+                </AuthorizeView>
+            </div>
+
+            <div class="col-sm-6 col-lg-4">
+                <AuthorizeView Roles="Admin, Sales">
+                    <FeatureCard Title="Phân hệ Sales" Subtitle="Theo dõi giao dịch bán hàng"
+                                 IconClass="bi bi-bag-check" IconBgClass="icon-bg-sales" PrimaryText="Phân hệ Sales"
+                                 PrimaryLink="/admin/sales" SecondaryText="Quản lý Đơn hàng" SecondaryLink="/admin/orders" />
+                </AuthorizeView>
+            </div>
+
+            <div class="col-sm-6 col-lg-4">
+                <AuthorizeView Roles="Admin, Warehouse">
+                    <FeatureCard Title="Phân hệ Kho" Subtitle="Nhập kho, xuất kho, kiểm kê" IconClass="bi bi-box-seam"
+                                 IconBgClass="icon-bg-warehouse" PrimaryText="Bảng điều khiển Kho"
+                                 PrimaryLink="/admin/warehouse" SecondaryText="Kiểm kê Kho" SecondaryLink="/admin/stock-take" />
+                </AuthorizeView>
+            </div>
+
+            <div class="col-sm-6 col-lg-4">
+                <AuthorizeView Roles="Admin, Logistics">
+                    <FeatureCard Title="Phân hệ Giao nhận" Subtitle="Quản lý vận chuyển & giao nhận"
+                                 IconClass="bi bi-truck" IconBgClass="icon-bg-logistics" PrimaryText="Phân hệ Giao nhận"
+                                 PrimaryLink="/admin/logistics" SecondaryText="Xem Đơn hàng" SecondaryLink="/admin/orders" />
+                </AuthorizeView>
+            </div>
+        </div>
+    }
+</div>
+
+@* ---------- Modals (unchanged) ---------- *@
+
+@if (showProductsModal)
+{
+    <div class="modal-overlay" @onclick="CloseProductsModal">
+        <div class="modal-panel" @onclick:stopPropagation>
+            <div class="modal-header">
+                <h5>Danh sách Sản phẩm (Tổng: @(modalProducts?.Count ?? 0))</h5>
+                <div>
+                    <button class="btn btn-sm btn-primary me-2" @onclick="NavigateToProducts">Xem tất cả</button>
+                    <button class="modal-close-btn" @onclick="CloseProductsModal">✕</button>
+                </div>
+            </div>
+            <div class="modal-body">
+                @if (productsLoading)
+                {
+                    <LoadingSpinner />
+                }
+                else if (modalProducts == null || !modalProducts.Any())
+                {
+                    <div class="text-muted">Không có sản phẩm.</div>
+                }
+                else
+                {
+                    <table class="table table-sm">
+                        <thead>
+                            <tr><th>Tên</th><th class="text-center">Tồn kho</th><th class="text-end">Giá</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var p in modalProducts)
+                            {
+                                <tr>
+                                    <td>@p.Name</td>
+                                    <td class="text-center">@p.StockQuantity</td>
+                                    <td class="text-end">@p.Price.ToString("n0") VNĐ</td>
+                                    <td class="text-end">
+                                        <button class="btn btn-sm btn-outline-primary" @onclick="() => NavigateToProductEdit(p.Id)">Sửa</button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@if (showOrdersModal)
+{
+    <div class="modal-overlay" @onclick="CloseOrdersModal">
+        <div class="modal-panel" @onclick:stopPropagation>
+            <div class="modal-header">
+                <h5>Đơn hàng chưa hoàn thành (Tổng: @(modalOrders?.Count ?? 0))</h5>
+                <div>
+                    <button class="btn btn-sm btn-primary me-2" @onclick="NavigateToOrdersNotCompleted">Xem tất cả</button>
+                    <button class="modal-close-btn" @onclick="CloseOrdersModal">✕</button>
+                </div>
+            </div>
+            <div class="modal-body">
+                @if (ordersLoading)
+                {
+                    <LoadingSpinner />
+                }
+                else if (modalOrders == null || !modalOrders.Any())
+                {
+                    <div class="text-muted">Không có đơn hàng phù hợp.</div>
+                }
+                else
+                {
+                    <table class="table table-sm">
+                        <thead><tr><th>ID</th><th>Khách hàng</th><th>Trạng thái</th><th class="text-center">Ngày</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var o in modalOrders)
+                            {
+                                <tr>
+                                    <td>#@o.Id</td>
+                                    <td>@o.CustomerName</td>
+                                    <td>@o.Status</td>
+                                    <td class="text-center">@o.OrderDate.ToLocalTime().ToString("g")</td>
+                                    <td class="text-end"><button class="btn btn-sm btn-outline-primary" @onclick="() => NavigateToOrderDetail(o.Id)">Chi tiết</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@if (showPurchaseOrdersModal)
+{
+    <div class="modal-overlay" @onclick="ClosePurchaseOrdersModal">
+        <div class="modal-panel" @onclick:stopPropagation>
+            <div class="modal-header">
+                <h5>Phiếu nhập chờ (Tổng: @(modalPOs?.Count ?? 0))</h5>
+                <div>
+                    <button class="btn btn-sm btn-primary me-2" @onclick="NavigateToPurchaseOrdersPending">Xem tất cả</button>
+                    <button class="modal-close-btn" @onclick="ClosePurchaseOrdersModal">✕</button>
+                </div>
+            </div>
+            <div class="modal-body">
+                @if (poLoading)
+                {
+                    <LoadingSpinner />
+                }
+                else if (modalPOs == null || !modalPOs.Any())
+                {
+                    <div class="text-muted">Không có phiếu nhập chờ.</div>
+                }
+                else
+                {
+                    <table class="table table-sm">
+                        <thead><tr><th>Số phiếu</th><th>Nhà cung cấp</th><th>Trạng thái</th><th>Ngày</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var po in modalPOs)
+                            {
+                                <tr>
+                                    <td>@po.PurchaseOrderNumber</td>
+                                    <td>@po.Supplier?.Name</td>
+                                    <td>@po.Status</td>
+                                    <td>@po.OrderDate.ToString("dd/MM/yyyy")</td>
+                                    <td class="text-end"><button class="btn btn-sm btn-outline-secondary" @onclick="() => NavigateToPurchaseOrderDetail(po.Id)">Chi tiết</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@if (showReturnReceiptsModal)
+{
+    <div class="modal-overlay" @onclick="CloseReturnReceiptsModal">
+        <div class="modal-panel" @onclick:stopPropagation>
+            <div class="modal-header">
+                <h5>Phiếu thu hồi chờ (Tổng: @(modalRRs?.Count ?? 0))</h5>
+                <div>
+                    <button class="btn btn-sm btn-primary me-2" @onclick="NavigateToReturnReceiptsPending">Xem tất cả</button>
+                    <button class="modal-close-btn" @onclick="CloseReturnReceiptsModal">✕</button>
+                </div>
+            </div>
+            <div class="modal-body">
+                @if (rrLoading)
+                {
+                    <LoadingSpinner />
+                }
+                else if (modalRRs == null || !modalRRs.Any())
+                {
+                    <div class="text-muted">Không có phiếu thu hồi chờ.</div>
+                }
+                else
+                {
+                    <table class="table table-sm">
+                        <thead><tr><th>Số phiếu</th><th>Đơn liên quan</th><th>Trạng thái</th><th>Ngày</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var rr in modalRRs)
+                            {
+                                <tr>
+                                    <td>@rr.ReturnReceiptNumber</td>
+                                    <td>@(rr.RelatedOrderId?.ToString() ?? "-")</td>
+                                    <td>@rr.Status</td>
+                                    <td>@rr.CreatedAt.ToLocalTime().ToString("g")</td>
+                                    <td class="text-end"><button class="btn btn-sm btn-outline-secondary" @onclick="() => NavigateToReturnReceiptDetail(rr.Id)">Chi tiết</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool isLoading = true;
+
+    // KPI
+    private int productsCount = 0;
+    private int ordersPendingCount = 0;
+    private int poPendingCount = 0;
+    private int rrPendingCount = 0;
+
+    private string? currentUserName;
+
+    // Modal states + data
+    private bool showProductsModal = false;
+    private bool productsLoading = false;
+    private List<Product>? modalProducts;
+
+    private bool showOrdersModal = false;
+    private bool ordersLoading = false;
+    private List<Order>? modalOrders;
+
+    private bool showPurchaseOrdersModal = false;
+    private bool poLoading = false;
+    private List<PurchaseOrder>? modalPOs;
+
+    private bool showReturnReceiptsModal = false;
+    private bool rrLoading = false;
+    private List<ReturnReceipt>? modalRRs;
+
+    protected override async Task OnInitializedAsync()
+    {
+        isLoading = true;
+        try
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = auth.User;
+            currentUserName = user?.Identity?.Name ?? "Quản trị viên";
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            // Products: tổng sản phẩm
+            productsCount = await db.Products.CountAsync();
+
+            // Orders pending: đếm những đơn chưa ở trạng thái cuối ("Hoàn thành" hoặc "Đã hủy")
+            ordersPendingCount = await db.Orders
+                .AsNoTracking()
+                .Where(o => o.Status != "Hoàn thành" && o.Status != "Đã hủy")
+                .CountAsync();
+
+            // Purchase Orders pending: đếm PO mà chưa về "Đã nhận hàng" hoặc "Đã nhận hàng (có chênh lệch)"
+            poPendingCount = await db.PurchaseOrders
+                .AsNoTracking()
+                .Where(po => po.Status != "Đã nhận hàng" && po.Status != "Đã nhận hàng (có chênh lệch)")
+                .CountAsync();
+
+            // Return Receipts pending: đếm RR mà chưa về "Đã nhận hàng" hoặc "Đã nhận hàng (có chênh lệch)"
+            rrPendingCount = await db.ReturnReceipts
+                .AsNoTracking()
+                .Where(rr => rr.Status != "Đã nhận hàng" && rr.Status != "Đã nhận hàng (có chênh lệch)")
+                .CountAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[Admin Index] Load error: " + ex);
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task Refresh()
+    {
+        await OnInitializedAsync();
+    }
+
+    // ---------- Navigation helpers ----------
+    private void NavigateToProducts() => Navigation.NavigateTo("/admin/products");
+    private void NavigateToOrdersNotCompleted() => Navigation.NavigateTo("/admin/orders?status=notcompleted");
+    private void NavigateToPurchaseOrdersPending() => Navigation.NavigateTo("/admin/purchase-orders?status=pending");
+    private void NavigateToReturnReceiptsPending() => Navigation.NavigateTo("/admin/return-receipts?status=pending");
+
+    private void NavigateToProductEdit(int id) => Navigation.NavigateTo($"/admin/products/edit/{id}");
+    private void NavigateToOrderDetail(int id) => Navigation.NavigateTo($"/admin/orders/{id}");
+    private void NavigateToPurchaseOrderDetail(int id) => Navigation.NavigateTo($"/admin/purchase-orders/{id}");
+    private void NavigateToReturnReceiptDetail(int id) => Navigation.NavigateTo($"/admin/return-receipts/{id}");
+
+    // ---------- Products modal ----------
+    private async Task OpenProductsModal()
+    {
+        showProductsModal = true;
+        productsLoading = true;
+        modalProducts = new List<Product>();
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            // Load top 100 products for modal
+            modalProducts = await db.Products
+                .AsNoTracking()
+                .OrderByDescending(p => p.Id)
+                .Take(100)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[OpenProductsModal] " + ex);
+        }
+        finally
+        {
+            productsLoading = false;
+        }
+    }
+    private void CloseProductsModal() => showProductsModal = false;
+
+    // ---------- Orders modal (not completed: exclude "Hoàn thành" and "Đã hủy") ----------
+    private async Task OpenOrdersModal()
+    {
+        showOrdersModal = true;
+        ordersLoading = true;
+        modalOrders = new List<Order>();
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            // **Chỉ lấy đơn không ở trạng thái "Hoàn thành" và không ở trạng thái "Đã hủy"**
+            modalOrders = await db.Orders
+                .AsNoTracking()
+                .Where(o => o.Status != "Hoàn thành" && o.Status != "Đã hủy")
+                .OrderByDescending(o => o.OrderDate)
+                .Take(100)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[OpenOrdersModal] " + ex);
+        }
+        finally
+        {
+            ordersLoading = false;
+        }
+    }
+    private void CloseOrdersModal() => showOrdersModal = false;
+
+    // ---------- PurchaseOrders modal (pending) ----------
+    private async Task OpenPurchaseOrdersModal()
+    {
+        showPurchaseOrdersModal = true;
+        poLoading = true;
+        modalPOs = new List<PurchaseOrder>();
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            modalPOs = await db.PurchaseOrders
+                .Include(po => po.Supplier)
+                .AsNoTracking()
+                .Where(po => po.Status != "Đã nhận hàng" && po.Status != "Đã nhận hàng (có chênh lệch)")
+                .OrderByDescending(po => po.OrderDate)
+                .Take(100)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[OpenPurchaseOrdersModal] " + ex);
+        }
+        finally
+        {
+            poLoading = false;
+        }
+    }
+    private void ClosePurchaseOrdersModal() => showPurchaseOrdersModal = false;
+
+    // ---------- ReturnReceipts modal (pending) ----------
+    private async Task OpenReturnReceiptsModal()
+    {
+        showReturnReceiptsModal = true;
+        rrLoading = true;
+        modalRRs = new List<ReturnReceipt>();
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            modalRRs = await db.ReturnReceipts
+                .AsNoTracking()
+                .Where(rr => rr.Status != "Đã nhận hàng" && rr.Status != "Đã nhận hàng (có chênh lệch)")
+                .OrderByDescending(rr => rr.CreatedAt)
+                .Take(100)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[OpenReturnReceiptsModal] " + ex);
+        }
+        finally
+        {
+            rrLoading = false;
+        }
+    }
+    private void CloseReturnReceiptsModal() => showReturnReceiptsModal = false;
+}

@@ -1,0 +1,26 @@
+@inject NavigationManager Navigation
+
+<div class="input-group">
+    <input type="text" class="form-control" placeholder="Tìm kiếm sản phẩm..." @bind="searchTerm" @onkeyup="HandleKeyUp" />
+    <button class="btn btn-outline-secondary" type="button" @onclick="PerformSearch">Tìm kiếm</button>
+</div>
+
+@code {
+    private string? searchTerm;
+
+    private void HandleKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            PerformSearch();
+        }
+    }
+
+    private void PerformSearch()
+    {
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+        {
+            Navigation.NavigateTo(uri: $"tim-kiem?query={Uri.EscapeDataString(searchTerm)}");
+        }
+    }
+}

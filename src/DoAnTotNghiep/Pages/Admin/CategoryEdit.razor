@@ -1,0 +1,176 @@
+@page "/admin/categories/add"
+@page "/admin/categories/edit/{CategoryId:int}"
+@attribute [Authorize(Roles = "Admin")]
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Forms
+@inject ApplicationDbContext DbContext
+@inject NavigationManager Navigation
+
+<h3>@Title</h3>
+
+@if (editContext == null)
+{
+    <LoadingSpinner />
+}
+else
+{
+    <EditForm EditContext="editContext" OnValidSubmit="HandleValidSubmit">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="form-group mb-3">
+            <label for="name">Tên danh mục</label>
+            <InputText id="name" class="form-control" @bind-Value="CurrentCategory.Name" />
+            <ValidationMessage For="() => CurrentCategory.Name" />
+        </div>
+
+        <button type="submit" class="btn btn-primary">Lưu</button>
+        <a href="/admin/categories" class="btn btn-secondary ms-2">Hủy</a>
+    </EditForm>
+}
+
+@code {
+    [Parameter]
+    public int CategoryId { get; set; }
+
+    private Category CurrentCategory { get; set; } = new();
+    private string Title { get; set; } = "Thêm danh mục mới";
+
+    private EditContext? editContext;
+    private ValidationMessageStore? messageStore;
+
+    // Để hủy subscription nếu OnParametersSetAsync được gọi nhiều lần
+    private EventHandler<FieldChangedEventArgs>? onFieldChangedHandler;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Hủy đăng ký cũ (nếu có) để tránh rò rỉ
+        if (editContext != null && onFieldChangedHandler != null)
+        {
+            editContext.OnFieldChanged -= onFieldChangedHandler;
+            onFieldChangedHandler = null;
+        }
+
+        // Nếu CategoryId != 0 => chỉnh sửa, else tạo mới
+        if (CategoryId != 0)
+        {
+            Title = "Chỉnh sửa danh mục";
+            var categoryFromDb = await DbContext.Categories.FindAsync(CategoryId);
+            if (categoryFromDb != null)
+            {
+                CurrentCategory = categoryFromDb;
+            }
+            else
+            {
+                // Không tìm thấy, khởi tạo mới
+                CurrentCategory = new Category();
+                Title = "Thêm danh mục mới";
+            }
+        }
+        else
+        {
+            Title = "Thêm danh mục mới";
+            CurrentCategory = new Category();
+        }
+
+        // Tạo EditContext + ValidationMessageStore cho form
+        editContext = new EditContext(CurrentCategory);
+        messageStore = new ValidationMessageStore(editContext);
+
+        // Khi field thay đổi, xóa lỗi tương ứng (tăng trải nghiệm UX)
+        onFieldChangedHandler = (sender, e) =>
+        {
+            try
+            {
+                messageStore?.Clear(e.FieldIdentifier);
+                // Thông báo state change để UI cập nhật
+                editContext?.NotifyValidationStateChanged();
+            }
+            catch
+            {
+                // ignore
+            }
+        };
+
+        editContext.OnFieldChanged += onFieldChangedHandler;
+    }
+
+    private async Task HandleValidSubmit()
+    {
+        if (editContext == null || messageStore == null)
+            return;
+
+        // Clear previous validation messages
+        messageStore.Clear();
+        editContext.NotifyValidationStateChanged();
+
+        var name = (CurrentCategory.Name ?? string.Empty).Trim();
+
+        if (string.IsNullOrEmpty(name))
+        {
+            var fid = new FieldIdentifier(CurrentCategory, nameof(CurrentCategory.Name));
+            messageStore.Add(fid, "Tên danh mục không được để trống.");
+            editContext.NotifyValidationStateChanged();
+            return;
+        }
+
+        // Kiểm tra trùng (không phân biệt hoa thường). Bỏ Category hiện tại (nếu sửa).
+        bool exists = await DbContext.Categories
+            .AnyAsync(c => c.Name.ToLower() == name.ToLower() && c.Id != CurrentCategory.Id);
+
+        if (exists)
+        {
+            var fid = new FieldIdentifier(CurrentCategory, nameof(CurrentCategory.Name));
+            messageStore.Add(fid, "Danh mục đã tồn tại. Vui lòng chọn tên khác.");
+            editContext.NotifyValidationStateChanged();
+            return;
+        }
+
+        // Nếu hợp lệ, lưu vào DB (thêm mới hoặc cập nhật)
+        try
+        {
+            CurrentCategory.Name = name; // lưu tên đã trim
+
+            if (CurrentCategory.Id == 0)
+            {
+                DbContext.Categories.Add(CurrentCategory);
+            }
+            else
+            {
+                // đảm bảo entity được attach nếu cần
+                var tracked = DbContext.ChangeTracker.Entries<Category>()
+                    .FirstOrDefault(e => e.Entity.Id == CurrentCategory.Id);
+                if (tracked == null)
+                {
+                    DbContext.Categories.Update(CurrentCategory);
+                }
+                else
+                {
+                    // nếu tracked != null, chỉ cập nhật property
+                    tracked.Entity.Name = CurrentCategory.Name;
+                }
+            }
+
+            await DbContext.SaveChangesAsync();
+
+            // Sau khi save thành công, chuyển về trang danh sách
+            Navigation.NavigateTo("/admin/categories");
+        }
+        catch (DbUpdateException dbEx)
+        {
+            // Nếu bạn có ràng buộc unique ở DB, handle duplicate key.
+            Console.WriteLine("[CategoryEdit] DbUpdateException: " + dbEx);
+
+            var fid = new FieldIdentifier(CurrentCategory, nameof(CurrentCategory.Name));
+            messageStore.Add(fid, "Lỗi khi lưu dữ liệu. Có thể tên danh mục đã tồn tại.");
+            editContext.NotifyValidationStateChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[CategoryEdit] Exception: " + ex);
+            var fid = new FieldIdentifier(CurrentCategory, nameof(CurrentCategory.Name));
+            messageStore.Add(fid, "Có lỗi xảy ra, vui lòng thử lại.");
+            editContext.NotifyValidationStateChanged();
+        }
+    }
+}

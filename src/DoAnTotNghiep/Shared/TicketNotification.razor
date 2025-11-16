@@ -1,0 +1,176 @@
+@using System.Security.Claims
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Identity
+@using DoAnTotNghiep.Data
+@using DoAnTotNghiep.Models
+
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject TicketService TicketService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+
+<div class="d-inline-block">
+    @if (!initialized)
+    {
+        <span class="spinner-border spinner-border-sm text-primary" role="status" aria-hidden="true"></span>
+    }
+    else if (!isAuthenticated)
+    {
+        @* Không hiện gì nếu chưa đăng nhập *@
+    }
+    else
+    {
+        @* Nếu là Admin: liên kết tới Admin tickets (hiển thị pending count)
+           Ngược lại: liên kết tới /tickets (hiển thị unread count) *@
+        @if (isAdmin)
+        {
+            <a class="btn btn-outline-primary position-relative d-inline-flex align-items-center"
+               href="/tickets"
+               title="Quản lý Tickets (Admin)">
+                <i class="bi bi-ticket-detailed me-1"></i>
+                <span class="d-none d-md-inline">Tickets</span>
+
+                @if (pendingCount > 0)
+                {
+                    <span class="badge bg-danger rounded-pill position-absolute"
+                          style="top:-6px; right:-6px; min-width:22px; height:22px; display:inline-flex; align-items:center; justify-content:center;">
+                        @ShortenCount(pendingCount)
+                    </span>
+                }
+
+                @if (unreadCount > 0)
+                {
+                    @* nhỏ show unread của admin nếu admin cũng watch *@
+                    <span class="badge bg-info rounded-pill ms-2" style="min-width:20px;">
+                        @ShortenCount(unreadCount)
+                    </span>
+                }
+            </a>
+        }
+        else
+        {
+            <a class="btn btn-outline-primary position-relative d-inline-flex align-items-center"
+               href="/tickets"
+               title="Tickets của bạn">
+                <i class="bi bi-ticket-detailed me-1"></i>
+                <span class="d-none d-md-inline">Tickets</span>
+
+                @if (unreadCount > 0)
+                {
+                    <span class="badge bg-danger rounded-pill position-absolute"
+                          style="top:-6px; right:-6px; min-width:22px; height:22px; display:inline-flex; align-items:center; justify-content:center;">
+                        @ShortenCount(unreadCount)
+                    </span>
+                }
+            </a>
+        }
+    }
+</div>
+
+@code {
+    private bool initialized = false;
+    private bool isAuthenticated = false;
+    private bool isAdmin = false;
+    private string? userId;
+
+    private int unreadCount = 0;    // tickets chưa đọc cho user
+    private int pendingCount = 0;   // tickets open/pending (admin)
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Subscribe to ticket events for realtime-ish updates (an toàn nếu TicketService null)
+        if (TicketService != null)
+            TicketService.OnTicketsReadChanged += OnTicketsChanged;
+
+        await RefreshStateAsync();
+
+        initialized = true;
+    }
+
+    private async void OnTicketsChanged()
+    {
+        // Event từ TicketService, ta reload counts
+        await InvokeAsync(async () =>
+        {
+            await LoadCountsAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async Task RefreshStateAsync()
+    {
+        var authState = await AuthState();
+        var user = authState.User;
+        isAuthenticated = user?.Identity?.IsAuthenticated == true;
+        if (!isAuthenticated)
+        {
+            isAdmin = false;
+            userId = null;
+            unreadCount = 0;
+            pendingCount = 0;
+            return;
+        }
+
+        userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        isAdmin = user.IsInRole("Admin");
+
+        await LoadCountsAsync();
+        StateHasChanged();
+    }
+
+    private async Task LoadCountsAsync()
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            // unread for current user (TicketWatcher.IsRead == false)
+            if (!string.IsNullOrEmpty(userId))
+            {
+                unreadCount = await db.TicketWatchers
+                    .AsNoTracking()
+                    .CountAsync(w => w.UserId == userId && !w.IsRead);
+            }
+            else
+            {
+                unreadCount = 0;
+            }
+
+            // pending for admin (tickets with Status == Open)
+            if (isAdmin)
+            {
+                // Count tickets with status Open (or adjust to your wanted filter)
+                pendingCount = await db.Tickets
+                    .AsNoTracking()
+                    .CountAsync(t => t.Status == TicketStatus.Open);
+            }
+            else
+            {
+                // If not admin, pendingCount unused
+                pendingCount = 0;
+            }
+        }
+        catch (Exception ex)
+        {
+            // Lỗi DB — nên log nhưng không phá UI
+            Console.WriteLine($"[TicketNotification] LoadCountsAsync error: {ex}");
+            unreadCount = 0;
+            pendingCount = 0;
+        }
+    }
+
+    // Helper để short-format số lớn
+    private string ShortenCount(int n)
+        => n > 99 ? "99+" : n.ToString();
+
+    private Task<AuthenticationState> AuthState()
+        => AuthStateProvider.GetAuthenticationStateAsync();
+
+    public void Dispose()
+    {
+        // Unsubscribe để tránh leak (an toàn nếu TicketService null)
+        if (TicketService != null)
+            TicketService.OnTicketsReadChanged -= OnTicketsChanged;
+    }
+}

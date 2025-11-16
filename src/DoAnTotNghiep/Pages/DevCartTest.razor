@@ -1,0 +1,36 @@
+@page "/dev/cart-test"
+@using Microsoft.EntityFrameworkCore
+@using DoAnTotNghiep.Models
+@implements IDisposable
+
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject CartService CartSvc
+@inject NavigationManager Navigation
+
+<h3>Dev Cart Test</h3>
+
+<p>Cart hash: <strong>@CartSvc.GetHashCode()</strong></p>
+<p>Total qty: <strong>@CartSvc.Items.Sum(i => i.Quantity)</strong>, distinct: @CartSvc.Items.Count</p>
+
+<button class="btn btn-primary" @onclick="AddOne">Add 1 of first product</button>
+
+@code {
+    private Product? firstProduct;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        firstProduct = await db.Products.AsNoTracking().FirstOrDefaultAsync(p => p.IsVisible);
+        Console.WriteLine($"[DevCartTest] OnInit CartSvc hash={CartSvc.GetHashCode()} items={CartSvc.Items.Sum(i=>i.Quantity)}");
+        CartSvc.OnChange += StateHasChanged;
+    }
+
+    public void Dispose() => CartSvc.OnChange -= StateHasChanged;
+
+    private void AddOne()
+    {
+        if (firstProduct == null) { Console.WriteLine("[DevCartTest] No product"); return; }
+        Console.WriteLine($"[DevCartTest] AddOne called. CartSvc hash={CartSvc.GetHashCode()}");
+        CartSvc.AddToCart(firstProduct, 1);
+    }
+}

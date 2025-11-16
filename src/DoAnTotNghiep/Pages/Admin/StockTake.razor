@@ -1,0 +1,672 @@
+@page "/admin/stock-take"
+@page "/admin/stock-take/page/{PageNumber:int}"
+@attribute [Authorize(Roles = "Admin, Warehouse")]
+
+@using System
+@using System.Security.Claims
+@using Microsoft.EntityFrameworkCore
+@using DoAnTotNghiep.Models
+@using Microsoft.AspNetCore.Components.Forms
+
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ToastService ToastSvc
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex align-items-center">
+        <button class="btn btn-outline-secondary btn-sm me-3" @onclick="GoBack" title="Quay lại" aria-label="Quay lại">
+            <i class="bi bi-arrow-left"></i> Quay lại
+        </button>
+        <h3 class="mb-0">Kiểm kê &amp; Yêu cầu Điều chỉnh Tồn kho</h3>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <p class="card-text">
+            Sử dụng giao diện này để kiểm tra và <strong>gửi yêu cầu</strong> cập nhật số lượng tồn kho thực tế của sản phẩm.
+            <br />Lưu ý: Yêu cầu sẽ ở trạng thái <em>Pending</em> — chỉ Admin mới có quyền phê duyệt (Approve) hoặc từ chối (Reject).
+        </p>
+
+        <div class="row mb-3">
+            <div class="col-md-6">
+                <input @bind="searchName" class="form-control" placeholder="Tìm kiếm theo tên sản phẩm..." />
+            </div>
+            <div class="col-md-6 text-end">
+                <button class="btn btn-primary me-2" @onclick="SearchProducts"><i class="bi bi-search"></i> Tìm kiếm</button>
+                <button class="btn btn-secondary" @onclick="ClearSearch"><i class="bi bi-x-circle"></i> Xóa lọc</button>
+            </div>
+        </div>
+
+        @if (productsPage == null)
+        {
+            <LoadingSpinner />
+        }
+        else
+        {
+            <table class="table table-bordered">
+                <thead class="table-light">
+                    <tr>
+                        <th>Sản phẩm</th>
+                        <th class="text-center">Tồn kho Hệ thống</th>
+                        <th class="text-center" style="width:150px">Số lượng Thực tế</th>
+                        <th style="width:260px">Hành động</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (productsPage.Any())
+                    {
+                        @foreach (var p in productsPage)
+                        {
+                            <tr>
+                                <td>
+                                    @p.Name
+                                    @if (p.HasPendingAdjustment)
+                                    {
+                                        string cls = GetPendingBadgeClass(p.PendingDelta);
+                                        string dtext = GetPendingDeltaText(p.PendingDelta);
+                                        string title = string.IsNullOrEmpty(dtext)
+                                            ? "Có yêu cầu điều chỉnh đang chờ phê duyệt"
+                                            : $"Có yêu cầu điều chỉnh: {dtext}";
+
+                                        <span class="badge @cls ms-2" title="@title">
+                                            <i class="bi bi-clock-fill"></i>
+                                            <span class="ms-1">Chờ @(string.IsNullOrEmpty(dtext) ? "" : $"({dtext})")</span>
+                                        </span>
+                                    }
+                                </td>
+                                <td class="text-center">@p.StockQuantity</td>
+                                <td>
+                                    <InputNumber TValue="int" @bind-Value="p.PhysicalCount" class="form-control" />
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-primary me-2"
+                                            @onclick="() => RequestAdjustment(p)"
+                                            disabled="@(p.PhysicalCount < 0 || p.PhysicalCount == p.StockQuantity || p.HasPendingAdjustment)">
+                                        <i class="bi bi-send"></i> Yêu cầu điều chỉnh
+                                    </button>
+
+                                    <a class="btn btn-sm btn-outline-secondary" href="@($"/admin/stock-adjustments?productId={p.Id}")">
+                                        Xem yêu cầu
+                                    </a>
+                                </td>
+                            </tr>
+                        }
+                    }
+                    else
+                    {
+                        <tr><td colspan="4" class="text-center text-muted">Không tìm thấy sản phẩm phù hợp.</td></tr>
+                    }
+                </tbody>
+            </table>
+
+            <!-- PHÂN TRANG SẢN PHẨM: giống Product.razor -->
+            <nav class="mt-3">
+                <ul class="pagination justify-content-center">
+                    <li class="page-item @(currentPage == 1 ? "disabled" : "")">
+                        <a class="page-link" href="@($"/admin/stock-take/page/{Math.Max(currentPage - 1, 1)}")">Trước</a>
+                    </li>
+                    @for (int i = 1; i <= totalPages; i++)
+                    {
+                        <li class="page-item @(currentPage == i ? "active" : "")">
+                            <a class="page-link" href="@($"/admin/stock-take/page/{i}")">@i</a>
+                        </li>
+                    }
+                    <li class="page-item @(currentPage == totalPages ? "disabled" : "")">
+                        <a class="page-link" href="@($"/admin/stock-take/page/{Math.Min(currentPage + 1, totalPages)}")">Sau</a>
+                    </li>
+                </ul>
+            </nav>
+        }
+    </div>
+</div>
+
+@* Bao Admin card bằng Authorized với Context khác tên để tránh trùng 'context' *@
+<AuthorizeView Roles="Admin">
+    <Authorized Context="adminAuth">
+        <div class="card">
+            <div class="card-body">
+                <h5>Yêu cầu điều chỉnh tồn kho (Admin)</h5>
+
+                <!-- Filter + ClearFilter -->
+                <div class="d-flex mb-3 align-items-center">
+                    <label class="me-2">Trạng thái:</label>
+                    <select class="form-select w-auto me-3" @bind="adminFilterStatus">
+                        <option value="">Tất cả</option>
+                        <option value="Pending">Pending</option>
+                        <option value="Approved">Approved</option>
+                        <option value="Rejected">Rejected</option>
+                    </select>
+
+                    <label class="me-2">Tìm:</label>
+                    <input class="form-control w-50 me-3" placeholder="tên sản phẩm hoặc request id" @bind="adminSearch" />
+
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary bi bi-search" @onclick="ApplyAdminFilter">Lọc</button>
+                        <button class="btn btn-secondary bi bi-x-circle" @onclick="ClearAdminFilter">Xóa lọc</button>
+                    </div>
+                </div>
+
+                @if (requests == null)
+                {
+                    <LoadingSpinner />
+                }
+                else if (!requests.Any())
+                {
+                    <div class="alert alert-info">Không có yêu cầu.</div>
+                }
+                else
+                {
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Sản phẩm</th>
+                                <th>Hệ thống</th>
+                                <th>Yêu cầu</th>
+                                <th>Người yêu cầu</th>
+                                <th>Ngày</th>
+                                <th>Trạng thái</th>
+                                <th>Hành động</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var r in requests)
+                            {
+                                <tr>
+                                    <td>@r.Id</td>
+                                    <td>@r.ProductName (ID:@r.ProductId)</td>
+                                    <td>@r.OldQuantity</td>
+                                    <td>@r.RequestedQuantity</td>
+                                    <td>@r.RequestedByEmail</td>
+                                    <td>@r.RequestedAt.ToLocalTime().ToString("g")</td>
+                                    <td>
+                                        <span class="badge @(r.Status == "Pending" ? "bg-warning text-dark" : r.Status == "Approved" ? "bg-success" : "bg-danger")">
+                                            @r.Status
+                                        </span>
+                                    </td>
+                                    <td>
+                                        @if (r.Status == "Pending")
+                                        {
+                                            <button class="btn btn-sm btn-success me-1" @onclick="() => ApproveRequest(r.Id)">Approve</button>
+                                            <button class="btn btn-sm btn-danger" @onclick="() => RejectRequest(r.Id)">Reject</button>
+                                        }
+                                        else
+                                        {
+                                            <small>Reviewed by: @r.ReviewedByEmail<br />@r.ReviewedAt?.ToLocalTime().ToString("g")</small>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+
+                    <nav class="mt-3">
+                        <ul class="pagination justify-content-center">
+                            <li class="page-item @(currentRequestPage == 1 ? "disabled" : "")">
+                                <button class="page-link" @onclick="() => ChangeRequestPage(currentRequestPage - 1)">Trước</button>
+                            </li>
+                            @for (int i = 1; i <= totalRequestPages; i++)
+                            {
+                                <li class="page-item @(currentRequestPage == i ? "active" : "")">
+                                    <button class="page-link" @onclick="() => ChangeRequestPage(i)">@i</button>
+                                </li>
+                            }
+                            <li class="page-item @(currentRequestPage == totalRequestPages ? "disabled" : "")">
+                                <button class="page-link" @onclick="() => ChangeRequestPage(currentRequestPage + 1)">Sau</button>
+                            </li>
+                        </ul>
+                    </nav>
+                }
+            </div>
+        </div>
+    </Authorized>
+</AuthorizeView>
+
+@code {
+    // route page param (giống Product.razor)
+    [Parameter]
+    public int PageNumber { get; set; } = 1;
+
+    // --- Warehouse products state
+    private List<ProductViewModel>? allProducts;
+    private IEnumerable<ProductViewModel> productsPage = Array.Empty<ProductViewModel>();
+    private string? searchName;
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private int totalPages = 1;
+
+    public class ProductViewModel
+    {
+        public int Id { get; set; }
+        public string? Name { get; set; }
+        public int StockQuantity { get; set; }
+        public int PhysicalCount { get; set; }
+        public bool HasPendingAdjustment { get; set; }
+        public int? PendingDelta { get; set; }
+    }
+
+    // --- Admin requests state
+    private List<InventoryAdjustmentRequest>? requests;
+    private string? adminFilterStatus;
+    private string? adminSearch;
+    private int currentRequestPage = 1;
+    private int requestPageSize = 10;
+    private int totalRequestPages = 1;
+
+    // --- User
+    private ClaimsPrincipal? currentUser;
+    private bool isAdmin = false;
+    private bool isWarehouse = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        currentUser = auth.User;
+        isAdmin = currentUser?.IsInRole("Admin") == true;
+        isWarehouse = currentUser?.IsInRole("Warehouse") == true;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // page from route param (Product.razor style)
+        currentPage = PageNumber > 0 ? PageNumber : 1;
+
+        // load products page according to currentPage
+        await LoadProducts(currentPage);
+
+        // if admin, also load requests for admin (use currentRequestPage)
+        if (isAdmin)
+            await LoadRequests(currentRequestPage);
+    }
+
+    // ---------------- Products pagination ----------------
+    private async Task LoadProducts(int? pageOverride = null)
+    {
+        // Force refresh step 1: clear current page => UI render rỗng
+        productsPage = Array.Empty<ProductViewModel>();
+        StateHasChanged();
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        IQueryable<Product> q = db.Products.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(searchName))
+        {
+            var s = searchName.Trim();
+            q = q.Where(p => EF.Functions.Like(p.Name!, $"%{s}%"));
+        }
+
+        var list = await q.OrderBy(p => p.Name).ToListAsync();
+
+        allProducts = list.Select(p => new ProductViewModel
+        {
+            Id = p.Id,
+            Name = p.Name,
+            StockQuantity = p.StockQuantity,
+            PhysicalCount = p.StockQuantity
+        }).ToList();
+
+        // Pending map (delta)
+        var ids = allProducts.Select(a => a.Id).ToList();
+        if (ids.Any())
+        {
+            var pending = await db.InventoryAdjustmentRequests
+                .Where(r => r.Status == "Pending" && ids.Contains(r.ProductId))
+                .GroupBy(r => r.ProductId)
+                .Select(g => g.OrderByDescending(x => x.RequestedAt).FirstOrDefault())
+                .ToListAsync();
+
+            var pendingMap = pending
+                .Where(x => x != null)
+                .ToDictionary(
+                    x => x!.ProductId,
+                    x => (int?)(x!.RequestedQuantity - x!.OldQuantity)
+                );
+
+            foreach (var pvm in allProducts)
+            {
+                if (pendingMap.TryGetValue(pvm.Id, out var delta))
+                {
+                    pvm.HasPendingAdjustment = true;
+                    pvm.PendingDelta = delta;
+                }
+                else
+                {
+                    pvm.HasPendingAdjustment = false;
+                    pvm.PendingDelta = null;
+                }
+            }
+        }
+
+        totalPages = Math.Max(1, (int)Math.Ceiling((double)allProducts.Count / pageSize));
+        currentPage = Math.Clamp(pageOverride ?? currentPage, 1, totalPages);
+
+        // Force refresh step 2: gán danh sách trang mới
+        productsPage = allProducts
+            .Skip((currentPage - 1) * pageSize)
+            .Take(pageSize)
+            .Select(x => new ProductViewModel
+            {
+                Id = x.Id,
+                Name = x.Name,
+                StockQuantity = x.StockQuantity,
+                PhysicalCount = x.PhysicalCount,
+                HasPendingAdjustment = x.HasPendingAdjustment,
+                PendingDelta = x.PendingDelta
+            })
+            .ToList();
+
+        StateHasChanged();
+    }
+
+    // navigation helper (programmatic navigation; anchor links will trigger OnParametersSetAsync)
+    private async Task ChangePage(int page)
+    {
+        if (page < 1) page = 1;
+        if (page > totalPages) page = totalPages;
+        currentPage = page;
+        Navigation.NavigateTo($"/admin/stock-take/page/{currentPage}");
+        await LoadProducts(currentPage);
+    }
+
+    private async Task SearchProducts()
+    {
+        // reset route page to 1 for search (keeps URL if you prefer)
+        PageNumber = 1;
+        currentPage = 1;
+        await LoadProducts(1);
+    }
+    private async Task ClearSearch() { searchName = null; PageNumber = 1; currentPage = 1; await LoadProducts(1); }
+
+    // -------------- Request adjustment (Warehouse) --------------
+    private async Task RequestAdjustment(ProductViewModel pvm)
+    {
+        if (!isWarehouse && !isAdmin)
+        {
+            ToastSvc.ShowToast("Bạn không có quyền.", ToastLevel.Warning);
+            return;
+        }
+        if (pvm.PhysicalCount < 0)
+        {
+            ToastSvc.ShowToast("Số lượng không thể âm.", ToastLevel.Error);
+            return;
+        }
+        if (pvm.PhysicalCount == pvm.StockQuantity)
+        {
+            ToastSvc.ShowToast("Số lượng không thay đổi.", ToastLevel.Info);
+            return;
+        }
+
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Xác nhận gửi yêu cầu điều chỉnh tồn kho cho '{pvm.Name}' từ {pvm.StockQuantity} → {pvm.PhysicalCount}?");
+        if (!ok) return;
+
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = auth.User;
+        var uid = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var email = user.Identity?.Name;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        try
+        {
+            var alreadyPending = await db.InventoryAdjustmentRequests
+                .AnyAsync(r => r.ProductId == pvm.Id && r.Status == "Pending");
+            if (alreadyPending)
+            {
+                ToastSvc.ShowToast("Đã có yêu cầu đang chờ duyệt.", ToastLevel.Info);
+                await LoadProducts(currentPage);
+                return;
+            }
+
+            var req = new InventoryAdjustmentRequest
+            {
+                ProductId = pvm.Id,
+                ProductName = pvm.Name,
+                OldQuantity = pvm.StockQuantity,
+                RequestedQuantity = pvm.PhysicalCount,
+                Status = "Pending",
+                RequestedAt = DateTime.UtcNow,
+                RequestedByUserId = uid,
+                RequestedByEmail = email
+            };
+
+            db.InventoryAdjustmentRequests.Add(req);
+            await db.SaveChangesAsync();
+
+            ToastSvc.ShowToast("✅ Đã gửi yêu cầu điều chỉnh.", ToastLevel.Success);
+
+            await LoadProducts(currentPage);
+            if (isAdmin) await LoadRequests(currentRequestPage);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[StockTake] RequestAdjustment error: " + ex);
+            ToastSvc.ShowToast("Đã có lỗi, vui lòng thử lại.", ToastLevel.Error);
+        }
+    }
+
+    // ---------------- Admin: requests pagination & actions ----------------
+    private async Task LoadRequests(int? pageOverride = null)
+    {
+        // Force refresh: clear trước
+        requests = null;
+        StateHasChanged();
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        IQueryable<InventoryAdjustmentRequest> q = db.InventoryAdjustmentRequests
+            .AsNoTracking()
+            .OrderByDescending(r => r.RequestedAt);
+
+        if (!string.IsNullOrWhiteSpace(adminFilterStatus))
+            q = q.Where(r => r.Status == adminFilterStatus);
+
+        if (!string.IsNullOrWhiteSpace(adminSearch))
+        {
+            var s = adminSearch.Trim();
+            if (int.TryParse(s, out int idsearch))
+                q = q.Where(r => r.Id == idsearch || EF.Functions.Like(r.ProductName!, $"%{s}%"));
+            else
+                q = q.Where(r => EF.Functions.Like(r.ProductName!, $"%{s}%") ||
+                                 EF.Functions.Like(r.RequestedByEmail!, $"%{s}%"));
+        }
+
+        var count = await q.CountAsync();
+        totalRequestPages = Math.Max(1, (int)Math.Ceiling((double)count / requestPageSize));
+        currentRequestPage = Math.Clamp(pageOverride ?? currentRequestPage, 1, totalRequestPages);
+
+        requests = await q
+            .Skip((currentRequestPage - 1) * requestPageSize)
+            .Take(requestPageSize)
+            .ToListAsync();
+
+        StateHasChanged();
+    }
+
+    private async Task ChangeRequestPage(int page) => await LoadRequests(page);
+    private async Task ApplyAdminFilter() => await LoadRequests(1);
+
+    // New: Clear admin filters
+    private async Task ClearAdminFilter()
+    {
+        adminFilterStatus = null;
+        adminSearch = null;
+        currentRequestPage = 1;
+        await LoadRequests(1);
+    }
+
+    private async Task ApproveRequest(int requestId)
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"Phê duyệt yêu cầu #{requestId}? Việc này sẽ cập nhật tồn kho.");
+        if (!ok) return;
+
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = auth.User;
+        var reviewerId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var reviewerEmail = user.Identity?.Name;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        await using var tx = await db.Database.BeginTransactionAsync();
+        try
+        {
+            var req = await db.InventoryAdjustmentRequests.FirstOrDefaultAsync(r => r.Id == requestId);
+            if (req == null)
+            {
+                ToastSvc.ShowToast("Không tìm thấy yêu cầu.", ToastLevel.Warning);
+                return;
+            }
+            if (req.Status != "Pending")
+            {
+                ToastSvc.ShowToast("Yêu cầu đã được xử lý.", ToastLevel.Info);
+                return;
+            }
+
+            var prod = await db.Products.FirstOrDefaultAsync(p => p.Id == req.ProductId);
+            if (prod == null)
+            {
+                ToastSvc.ShowToast("Sản phẩm không tồn tại.", ToastLevel.Error);
+                return;
+            }
+
+            int oldQty = prod.StockQuantity;
+            int newQty = req.RequestedQuantity;
+            int change = newQty - oldQty;
+
+            // Update product
+            prod.StockQuantity = newQty;
+            db.Products.Update(prod);
+
+            // Optional: inventory log
+            try
+            {
+                var log = new InventoryLog
+                {
+                    ProductId = prod.Id,
+                    QuantityChange = change,
+                    NewQuantity = prod.StockQuantity,
+                    Reason = $"Phê duyệt điều chỉnh (Request #{req.Id})",
+                    Timestamp = DateTime.Now
+                };
+                await db.InventoryLogs.AddAsync(log);
+            }
+            catch { /* nếu không có bảng InventoryLogs thì bỏ qua */ }
+
+            // Update request
+            req.Status = "Approved";
+            req.ReviewedAt = DateTime.UtcNow;
+            req.ReviewedByUserId = reviewerId;
+            req.ReviewedByEmail = reviewerEmail;
+            req.ReviewComment = "Approved";
+            db.InventoryAdjustmentRequests.Update(req);
+
+            await db.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            ToastSvc.ShowToast($"✅ Đã phê duyệt yêu cầu #{req.Id} ({oldQty} → {newQty}).", ToastLevel.Success);
+
+            await LoadRequests(currentRequestPage);
+            await LoadProducts(currentPage);
+        }
+        catch (Exception ex)
+        {
+            try { await tx.RollbackAsync(); } catch { }
+            Console.WriteLine("[StockTake] Approve error: " + ex);
+            ToastSvc.ShowToast("Có lỗi khi phê duyệt. Vui lòng thử lại.", ToastLevel.Error);
+        }
+    }
+
+    private async Task RejectRequest(int requestId)
+    {
+        string? comment = null;
+        try
+        {
+            comment = await JS.InvokeAsync<string>("prompt", $"Nhập lý do từ chối cho request #{requestId} (bỏ trống nếu không):");
+        }
+        catch { comment = null; }
+
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = auth.User;
+        var reviewerId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var reviewerEmail = user.Identity?.Name;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        try
+        {
+            var req = await db.InventoryAdjustmentRequests.FirstOrDefaultAsync(r => r.Id == requestId);
+            if (req == null)
+            {
+                ToastSvc.ShowToast("Không tìm thấy yêu cầu.", ToastLevel.Warning);
+                return;
+            }
+            if (req.Status != "Pending")
+            {
+                ToastSvc.ShowToast("Yêu cầu đã được xử lý.", ToastLevel.Info);
+                return;
+            }
+
+            req.Status = "Rejected";
+            req.ReviewedAt = DateTime.UtcNow;
+            req.ReviewedByUserId = reviewerId;
+            req.ReviewedByEmail = reviewerEmail;
+            req.ReviewComment = string.IsNullOrWhiteSpace(comment) ? "Rejected by admin" : comment;
+            db.InventoryAdjustmentRequests.Update(req);
+            await db.SaveChangesAsync();
+
+            ToastSvc.ShowToast($"Đã từ chối yêu cầu #{req.Id}.", ToastLevel.Info);
+
+            await LoadRequests(currentRequestPage);
+            await LoadProducts(currentPage);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("[StockTake] Reject error: " + ex);
+            ToastSvc.ShowToast("Có lỗi khi từ chối yêu cầu. Vui lòng thử lại.", ToastLevel.Error);
+        }
+    }
+
+    // ---------------- helpers ----------------
+    private string GetPendingBadgeClass(int? delta)
+    {
+        if (!delta.HasValue) return "bg-info text-dark";
+        if (delta > 0) return "bg-success text-white";
+        if (delta < 0) return "bg-danger text-white";
+        return "bg-info text-dark";
+    }
+
+    private string GetPendingDeltaText(int? delta)
+    {
+        if (!delta.HasValue) return string.Empty;
+        return delta > 0 ? $"+{delta}" : delta.ToString();
+    }
+
+    // ---------------- GoBack ----------------
+    private async Task GoBack()
+    {
+        try
+        {
+            var handled = false;
+            try
+            {
+                handled = await JS.InvokeAsync<bool>("appHelpers.goBackIfPossible");
+            }
+            catch
+            {
+                handled = false;
+            }
+
+            if (!handled)
+            {
+                Navigation.NavigateTo("/admin");
+            }
+        }
+        catch
+        {
+            Navigation.NavigateTo("/admin");
+        }
+    }
+}
+
+

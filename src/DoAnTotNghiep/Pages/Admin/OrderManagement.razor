@@ -1,0 +1,351 @@
+@page "/admin/orders"
+@page "/admin/orders/page/{PageNumber:int}"
+@attribute [Authorize(Roles = "Admin, Sales, Warehouse, Logistics")]
+
+@using Microsoft.EntityFrameworkCore
+@using System.Security.Claims
+@using System.Linq
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject OrderService OrderSvc
+@inject ToastService ToastSvc
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+@* Header with Back button consistent with other pages *@
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap">
+    <div class="d-flex align-items-center">
+        <button class="btn btn-outline-secondary btn-sm" @onclick="GoBack" title="Quay lại" aria-label="Quay lại">
+            <i class="bi bi-arrow-left"></i>
+            <span class="d-none d-sm-inline ms-1">Quay lại</span>
+        </button>
+
+        <div class="ms-3">
+            <h3 class="mb-0">Quản lý Đơn hàng</h3>
+            <small class="text-muted">Danh sách & quản lý các đơn hàng theo phân quyền</small>
+        </div>
+    </div>
+
+    <!-- Search block: stays on the right (responsive) -->
+    <div class="flex-grow-1" style="min-width:320px; max-width:800px;">
+        <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input @bind="searchTerm" @bind:event="oninput" class="form-control"
+                   placeholder="Tìm ID / Tên KH / Trạng thái..." aria-label="Tìm đơn hàng" />
+            <button class="btn btn-outline-primary" @onclick="SearchOrders" title="Tìm kiếm">
+                <i class="bi bi-filter-circle me-1"></i> Tìm
+            </button>
+            <button class="btn btn-outline-secondary" @onclick="ClearSearch" title="Xóa lọc">
+                <i class="bi bi-x-circle me-1"></i> Xóa
+            </button>
+        </div>
+    </div>
+</div>
+
+@if (pagedOrders == null)
+{
+    <LoadingSpinner />
+}
+else if (!pagedOrders.Any())
+{
+    <div class="alert alert-info mt-4">
+        Không có đơn hàng nào phù hợp với vai trò của bạn ở thời điểm hiện tại.
+    </div>
+}
+else
+{
+    <div class="table-responsive shadow-sm rounded">
+        <table class="table table-striped table-hover mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>ID Đơn hàng</th>
+                    <th>Tên Khách hàng</th>
+                    <th>Ngày Đặt</th>
+                    <th>Trạng thái</th>
+                    <th>Tổng tiền</th>
+                    <th class="text-end">Hành động</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var order in pagedOrders)
+                {
+                    <tr>
+                        <td>@order.Id</td>
+                        <td>@order.CustomerName</td>
+                        <td>@order.OrderDate.ToString("dd/MM/yyyy HH:mm")</td>
+                        <td>
+                            <span class="badge @GetStatusBadgeClass(order.Status)">@order.Status</span>
+                        </td>
+                        <td>@order.TotalAmount.ToString("n0") VNĐ</td>
+                        <td class="text-end">
+                            <div class="d-flex justify-content-end gap-2">
+                                <a class="btn btn-sm btn-outline-secondary" href="@($"admin/orders/{order.Id}")"
+                                    title="Xem chi tiết">
+                                    <i class="bi bi-eye"></i> Xem
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <!-- PHÂN TRANG (đã làm đẹp, logic giữ nguyên) -->
+    @if (totalPages > 1)
+    {
+        <nav aria-label="Page navigation" class="mt-3">
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <div>
+                    <a class="btn btn-outline-secondary btn-sm rounded-pill d-flex align-items-center"
+                        href="@($"/admin/orders/page/{Math.Max(currentPage - 1, 1)}")"
+                        aria-disabled="@(currentPage == 1 ? "true" : "false")" title="Trang trước">
+                        <i class="bi bi-chevron-left me-1"></i> Trước
+                    </a>
+                </div>
+
+                <div class="d-flex align-items-center flex-wrap" style="gap:6px;">
+                    @{
+                        int maxButtons = 7;
+                        int start = Math.Max(1, currentPage - maxButtons / 2);
+                        int end = Math.Min(totalPages, start + maxButtons - 1);
+                        if (end - start + 1 < maxButtons)
+                        {
+                            start = Math.Max(1, end - maxButtons + 1);
+                        }
+                    }
+
+                    @if (start > 1)
+                    {
+                        <a class="btn btn-outline-secondary btn-sm rounded-pill" href="@($"/admin/orders/page/1")">1</a>
+                        @if (start > 2)
+                        {
+                            <span class="text-muted px-2">…</span>
+                        }
+                    }
+
+                    @for (int i = start; i <= end; i++)
+                    {
+                        var pageNum = i;
+                        if (pageNum == currentPage)
+                        {
+                            <a class="btn btn-primary btn-sm rounded-pill" href="@($"/admin/orders/page/{pageNum}")"
+                                aria-current="page">@pageNum</a>
+                        }
+                        else
+                        {
+                            <a class="btn btn-outline-secondary btn-sm rounded-pill"
+                                href="@($"/admin/orders/page/{pageNum}")">@pageNum</a>
+                        }
+                    }
+
+                    @if (end < totalPages)
+                    {
+                        if (end < totalPages - 1)
+                        {
+                            <span class="text-muted px-2">…</span>
+                        }
+                        <a class="btn btn-outline-secondary btn-sm rounded-pill"
+                            href="@($"/admin/orders/page/{totalPages}")">@totalPages</a>
+                    }
+                </div>
+
+                <div class="d-flex align-items-center gap-3">
+                    <a class="btn btn-outline-secondary btn-sm rounded-pill d-flex align-items-center"
+                        href="@($"/admin/orders/page/{Math.Min(currentPage + 1, totalPages)}")"
+                        aria-disabled="@(currentPage == totalPages ? "true" : "false")" title="Trang sau">
+                        Sau <i class="bi bi-chevron-right ms-1"></i>
+                    </a>
+
+                    <div class="text-muted small">
+                        Trang <strong>@currentPage</strong> / <strong>@totalPages</strong>
+                    </div>
+                </div>
+            </div>
+        </nav>
+    }
+}
+
+@code {
+    // route page param (giống Product.razor)
+    [Parameter]
+    public int PageNumber { get; set; } = 1;
+
+    private List<Order>? allOrders;
+    private IEnumerable<Order>? pagedOrders;
+
+    private string? searchTerm;
+
+    // Phân trang
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private int totalPages = 1;
+
+    // Current user (roles)
+    private ClaimsPrincipal? currentUser;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Lấy trạng thái xác thực, vai trò user
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        currentUser = authState.User;
+        // Do not load orders here — OnParametersSetAsync sẽ đảm nhiệm (với PageNumber)
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Lấy trang từ route param
+        currentPage = PageNumber > 0 ? PageNumber : 1;
+        await LoadOrders();
+    }
+
+    private async Task LoadOrders()
+    {
+        // Tạo DbContext riêng cho lần load này
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        IQueryable<Order> query = db.Orders.AsNoTracking();
+
+        // Lọc theo vai trò (Admin thấy tất cả)
+        if (currentUser == null || !currentUser.IsInRole("Admin"))
+        {
+            var allowedStatuses = new HashSet<string>();
+
+            if (currentUser?.IsInRole("Sales") == true)
+                allowedStatuses.Add("Chờ xác nhận");
+            if (currentUser?.IsInRole("Warehouse") == true)
+                allowedStatuses.Add("Đã thanh toán");
+            if (currentUser?.IsInRole("Logistics") == true)
+            {
+                allowedStatuses.Add("Sẵn sàng giao hàng");
+                allowedStatuses.Add("Đang giao");
+            }
+
+            if (allowedStatuses.Count > 0)
+                query = query.Where(o => allowedStatuses.Contains(o.Status));
+            else
+                query = query.Where(o => false); // không cho thấy gì
+        }
+
+        // Tìm kiếm
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+        {
+            var s = searchTerm.Trim();
+
+            if (int.TryParse(s, out int idSearch))
+            {
+                query = query.Where(o =>
+                o.Id == idSearch ||
+                EF.Functions.Like(o.CustomerName, $"%{s}%") ||
+                EF.Functions.Like(o.Status, $"%{s}%"));
+            }
+            else
+            {
+                query = query.Where(o =>
+                EF.Functions.Like(o.CustomerName, $"%{s}%") ||
+                EF.Functions.Like(o.Status, $"%{s}%"));
+            }
+        }
+
+        allOrders = await query
+        .OrderByDescending(o => o.OrderDate)
+        .ToListAsync();
+
+        // Tính số trang
+        totalPages = (int)Math.Ceiling((double)allOrders.Count / pageSize);
+        if (totalPages == 0) totalPages = 1;
+
+        // ensure currentPage in range
+        if (currentPage < 1) currentPage = 1;
+        if (currentPage > totalPages) currentPage = totalPages;
+
+        // Chia trang
+        pagedOrders = allOrders
+        .Skip((currentPage - 1) * pageSize)
+        .Take(pageSize)
+        .ToList();
+    }
+
+    private async Task SearchOrders()
+    {
+        // reset to first page when searching
+        PageNumber = 1;
+        currentPage = 1;
+        await LoadOrders();
+    }
+
+    private async Task ClearSearch()
+    {
+        searchTerm = null;
+        PageNumber = 1;
+        currentPage = 1;
+        await LoadOrders();
+    }
+
+    // Optional programmatic navigation if you want to navigate w/o anchors
+    private async Task ChangePage(int page)
+    {
+        page = Math.Clamp(page, 1, totalPages);
+        if (page == currentPage) return;
+
+        // navigate so url shows page
+        Navigation.NavigateTo($"/admin/orders/page/{page}");
+        // OnParametersSetAsync will trigger LoadOrders when navigation completes;
+        // but to be safe, we can set currentPage and load now as well.
+        currentPage = page;
+        await LoadOrders();
+    }
+
+    private string GetStatusBadgeClass(string status)
+    {
+        return status switch
+        {
+            "Hoàn thành" => "bg-success",
+            "Đã hủy" => "bg-danger",
+            "Đang giao" => "bg-primary",
+            "Sẵn sàng giao hàng" => "bg-warning text-dark",
+            "Đã thanh toán" => "bg-info text-dark",
+            "Chờ xác nhận" => "bg-secondary",
+            _ => "bg-secondary"
+        };
+    }
+
+    private bool CanCancel(Order order)
+    {
+        // Không cho hủy nếu đã hủy/đã giao/hoàn thành
+        var forbidden = new[] { "Đã hủy", "Đã giao", "Hoàn thành" };
+        if (forbidden.Contains(order.Status)) return false;
+
+        // Cho phép hủy nếu user là Admin hoặc Sales
+        if (currentUser?.IsInRole("Admin") == true) return true;
+        if (currentUser?.IsInRole("Sales") == true) return true;
+
+        return false;
+    }
+
+    
+    private async Task GoBack()
+    {
+        try
+        {
+            var handled = false;
+            try
+            {
+                handled = await JS.InvokeAsync<bool>("appHelpers.goBackIfPossible");
+            }
+            catch
+            {
+                handled = false;
+            }
+
+            if (!handled)
+            {
+                Navigation.NavigateTo("/admin");
+            }
+        }
+        catch
+        {
+            Navigation.NavigateTo("/admin");
+        }
+    }
+}

@@ -1,0 +1,45 @@
+using System;
+using System.ComponentModel.DataAnnotations;
+
+namespace DoAnTotNghiep.Models
+{
+    public class Product
+    {
+        public int Id { get; set; }
+
+        [Required(ErrorMessage = "Tên sản phẩm là bắt buộc.")]
+        public string? Name { get; set; }
+
+        public decimal Price { get; set; }
+        public string? ImageUrl { get; set; }
+
+        [Range(1, int.MaxValue, ErrorMessage = "Vui lòng chọn một danh mục.")]
+        public int CategoryId { get; set; }
+
+        public Category? Category { get; set; }
+
+        [MaxLength(2000, ErrorMessage = "Mô tả không được quá 2000 ký tự.")]
+        [DataType(DataType.MultilineText)]
+        public string? Description { get; set; }
+
+        [Range(0, int.MaxValue, ErrorMessage = "Số lượng tồn kho không thể là số âm.")]
+        public int StockQuantity { get; set; }
+
+        public bool IsVisible { get; set; } = true;
+
+        [Timestamp]
+        public byte[]? RowVersion { get; set; }
+
+        // ---------------------------
+        // Ownership & audit
+        // ---------------------------
+        // IdentityUser.Id is a string (nvarchar(450)). OwnerId stores user id of creator/owner.
+        public string? OwnerId { get; set; }
+        public string? LastUpdatedById { get; set; }
+
+
+        // Optional: timestamps for bookkeeping
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? UpdatedAt { get; set; }
+    }
+}
