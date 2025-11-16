@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.OpenApi.Models;
 using System.Net.Http;
+using Microsoft.Extensions.Logging;
 
 namespace DoAnTotNghiep
 {
@@ -37,75 +38,105 @@ namespace DoAnTotNghiep
             // Connection string
             var connectionString = Configuration.GetConnectionString("DefaultConnection");
 
-            // Use DbContextFactory for Blazor Server to avoid DbContext concurrency issues
+            // Use DbContextFactory
             services.AddDbContextFactory<ApplicationDbContext>(options =>
                 options.UseSqlServer(connectionString));
 
-            // Provide ApplicationDbContext as scoped (created from factory) so Identity/controllers can inject it
             services.AddScoped(provider =>
                 provider.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
 
-            // Identity (cookie-based for UI)
+            // Identity: stronger password policy + lockout
             services.AddIdentity<IdentityUser, IdentityRole>(options =>
             {
-                options.SignIn.RequireConfirmedAccount = false;
-                options.Password.RequireDigit = false;
-                options.Password.RequireLowercase = false;
-                options.Password.RequireUppercase = false;
-                options.Password.RequireNonAlphanumeric = false;
-                options.Password.RequiredLength = 6;
+                options.SignIn.RequireConfirmedAccount = false; // optionally true if email configured
+
+                // Password policy (stronger)
+                options.Password.RequireDigit = true;
+                options.Password.RequireLowercase = true;
+                options.Password.RequireUppercase = true;
+                options.Password.RequireNonAlphanumeric = true;
+                options.Password.RequiredLength = 8;
+
+                // Lockout policy
+                options.Lockout.MaxFailedAccessAttempts = 5;
+                options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+                options.Lockout.AllowedForNewUsers = true;
             })
             .AddDefaultTokenProviders()
             .AddDefaultUI()
             .AddEntityFrameworkStores<ApplicationDbContext>();
 
-            // Configure application cookie (Identity cookie settings)
+            // Configure application cookie with secure defaults
             services.ConfigureApplicationCookie(options =>
             {
                 options.LoginPath = "/Identity/Account/Login";
                 options.AccessDeniedPath = "/Identity/Account/AccessDenied";
                 options.ExpireTimeSpan = TimeSpan.FromDays(14);
                 options.SlidingExpiration = true;
+
+                options.Cookie.HttpOnly = true;
+                options.Cookie.SameSite = SameSiteMode.Lax;
+                options.Cookie.SecurePolicy = _env.IsDevelopment() ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
             });
 
-            // JWT configuration (for API access) — do NOT override default cookie scheme here
+            // JWT configuration (for API access)
             var jwtSettings = Configuration.GetSection("Jwt");
-            var jwtKey = jwtSettings["Key"] ?? "DefaultSuperSecretKey_ReplaceThis";
+            var jwtKey = jwtSettings["Key"];
+            if (string.IsNullOrWhiteSpace(jwtKey))
+            {
+                if (!_env.IsDevelopment())
+                {
+                    throw new InvalidOperationException("JWT 'Key' is not configured. In production, Jwt:Key must be set via environment variables or secret manager.");
+                }
+                else
+                {
+                    // Development fallback: log warning via logger (avoid Console.WriteLine)
+                    using (var sp = services.BuildServiceProvider())
+                    {
+                        var devLogger = sp.GetRequiredService<ILogger<Startup>>();
+                        devLogger.LogWarning("Jwt:Key is missing in configuration. Using a development fallback key. Do NOT use this in production.");
+                    }
+
+                    jwtKey = "DevReplaceThisKey_DoNotUseInProd_ChangeIt";
+                }
+            }
+
             var key = Encoding.UTF8.GetBytes(jwtKey);
 
-            // Add authentication and add JwtBearer (without setting default scheme, so Identity cookie remains default for UI)
-            services.AddAuthentication()
-                .AddJwtBearer(options =>
+            services.AddAuthentication(options =>
+            {
+                // do not override default cookie scheme for UI
+            })
+            .AddJwtBearer(options =>
+            {
+                options.RequireHttpsMetadata = !_env.IsDevelopment();
+                options.SaveToken = true;
+                options.TokenValidationParameters = new TokenValidationParameters
                 {
-                    options.RequireHttpsMetadata = false;
-                    options.SaveToken = true;
-                    options.TokenValidationParameters = new TokenValidationParameters
-                    {
-                        ValidateIssuer = !string.IsNullOrWhiteSpace(jwtSettings["Issuer"]),
-                        ValidateAudience = !string.IsNullOrWhiteSpace(jwtSettings["Audience"]),
-                        ValidateLifetime = true,
-                        ValidateIssuerSigningKey = true,
-                        ValidIssuer = jwtSettings["Issuer"],
-                        ValidAudience = jwtSettings["Audience"],
-                        IssuerSigningKey = new SymmetricSecurityKey(key),
-                        ClockSkew = TimeSpan.Zero
-                    };
-                });
+                    ValidateIssuer = !string.IsNullOrWhiteSpace(jwtSettings["Issuer"]),
+                    ValidateAudience = !string.IsNullOrWhiteSpace(jwtSettings["Audience"]),
+                    ValidateLifetime = true,
+                    ValidateIssuerSigningKey = true,
+                    ValidIssuer = jwtSettings["Issuer"],
+                    ValidAudience = jwtSettings["Audience"],
+                    IssuerSigningKey = new SymmetricSecurityKey(key),
+                    ClockSkew = TimeSpan.Zero
+                };
+            });
 
-            // Add response compression (improves Blazor Server perf)
+            // Response compression
             services.AddResponseCompression(opts =>
             {
                 opts.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[] { "application/octet-stream" });
             });
 
-            // HttpClient factory (ServerAPI named)
+            // HttpClient factory
             services.AddHttpClient("ServerAPI", client =>
             {
                 client.BaseAddress = new Uri(Configuration["ServerApiBaseAddress"] ?? "https://localhost:5001/");
             });
             services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("ServerAPI"));
 
-            // Add HttpContextAccessor if some services need it
             services.AddHttpContextAccessor();
 
             // MVC / Razor / Blazor
@@ -114,42 +145,64 @@ namespace DoAnTotNghiep
             services.AddServerSideBlazor()
                     .AddCircuitOptions(options => options.DetailedErrors = _env.IsDevelopment());
 
-            // Application services (register lifetimes)
+            // Application services
             services.AddScoped<ToastService>();
-            services.AddScoped<CartService>();               // CartService must be Scoped for Blazor Server
+            services.AddScoped<CartService>();
             services.AddScoped<OrderService>();
             services.AddScoped<DashboardService>();
             services.AddScoped<PurchaseOrderService>();
             services.AddScoped<ReturnReceiptService>();
             services.AddScoped<TicketService>();
 
-
-            // AuthenticationStateProvider custom (if you implemented one)
+            // AuthenticationStateProvider custom
             services.AddScoped<AuthenticationStateProvider, CustomAuthenticationStateProvider>();
 
-            // Protected browser storage (local/session) for Blazor Server
             services.AddScoped<ProtectedLocalStorage>();
 
             // Authorization
             services.AddAuthorization();
 
-            // CORS policy (dev-friendly). Adjust allowed origins for production.
-            services.AddCors(options =>
+            // CORS: read AllowedOrigins from config. In production require explicit origins.
+            var allowedOrigins = Configuration["AllowedOrigins"];
+            if (string.IsNullOrWhiteSpace(allowedOrigins))
             {
-                options.AddPolicy("AllowAll", builder =>
+                if (_env.IsDevelopment())
                 {
-                    builder.AllowAnyHeader()
-                           .AllowAnyMethod()
-                           .AllowAnyOrigin(); // if you need cookies/credentials, use WithOrigins(...) and AllowCredentials()
+                    services.AddCors(options =>
+                    {
+                        options.AddPolicy("CorsPolicy", builder =>
+                        {
+                            builder.AllowAnyHeader()
+                                   .AllowAnyMethod()
+                                   .AllowAnyOrigin();
+                        });
+                    });
+                }
+                else
+                {
+                    throw new InvalidOperationException("AllowedOrigins must be configured in production (appsettings or env).");
+                }
+            }
+            else
+            {
+                var origins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(o => o.Trim()).ToArray();
+                services.AddCors(options =>
+                {
+                    options.AddPolicy("CorsPolicy", builder =>
+                    {
+                        builder.WithOrigins(origins)
+                               .AllowAnyHeader()
+                               .AllowAnyMethod()
+                               .AllowCredentials(); // use credentials only if necessary
+                    });
                 });
-            });
+            }
 
-            // Swagger/OpenAPI (useful for testing API)
+            // Swagger
             services.AddSwaggerGen(c =>
             {
                 c.SwaggerDoc("v1", new OpenApiInfo { Title = "KBHome API", Version = "v1" });
 
-                // Define the BearerAuth scheme that's in use
                 var securityScheme = new OpenApiSecurityScheme
                 {
                     Name = "Authorization",
@@ -167,17 +220,14 @@ namespace DoAnTotNghiep
                 };
                 c.AddSecurityRequirement(securityRequirement);
             });
-
-            // If you want to allow large file uploads for API, configure here (optional)
-            // services.Configure<FormOptions>(options => { options.MultipartBodyLengthLimit = 104857600; });
         }
 
-        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env, ILogger<Startup> logger)
         {
             // Enable response compression before static files
             app.UseResponseCompression();
 
-            if (_env.IsDevelopment())
+            if (env.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
 
@@ -196,11 +246,36 @@ namespace DoAnTotNghiep
             }
 
             app.UseHttpsRedirection();
+
+            // Security headers middleware — adjust CSP if you use CDN for scripts/styles/images
+            app.Use(async (context, next) =>
+            {
+                context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+                context.Response.Headers["X-Frame-Options"] = "DENY";
+                context.Response.Headers["Referrer-Policy"] = "no-referrer-when-downgrade";
+                context.Response.Headers["X-XSS-Protection"] = "1; mode=block";
+                context.Response.Headers["Permissions-Policy"] = "geolocation=(), microphone=()";
+
+                // Ensure logo (served from /images) is allowed by CSP: 'self' + data:
+                // Allow Google Fonts and common CDNs used for scripts/styles
+                context.Response.Headers["Content-Security-Policy"] =
+                    "default-src 'self'; " +
+                    "script-src 'self' https://cdn.jsdelivr.net https://unpkg.com; " +
+                    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://fonts.googleapis.com; " +
+                    "img-src 'self' data: https://cdn.jsdelivr.net; " +
+                    "font-src 'self' https://fonts.gstatic.com data:; " +
+                    "connect-src 'self'; " +
+                    "frame-ancestors 'none';";
+
+                await next();
+            });
+
+            // Serve static files (logo under wwwroot/images/* will be served)
             app.UseStaticFiles();
             app.UseRouting();
 
-            // CORS - must go before Authentication/Authorization if APIs are called from browsers
-            app.UseCors("AllowAll");
+            // Use configured CORS policy
+            app.UseCors("CorsPolicy");
 
             app.UseAuthentication();
             app.UseAuthorization();
@@ -212,6 +287,8 @@ namespace DoAnTotNghiep
                 endpoints.MapBlazorHub();
                 endpoints.MapFallbackToPage("/_Host");
             });
+
+            logger.LogInformation("Startup configured. Environment: {Env}", env.EnvironmentName);
         }
     }
 }

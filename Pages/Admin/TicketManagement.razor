@@ -173,7 +173,7 @@ else
                                 @* If Closed, show Closed at badge *@
                                 @if (ticket.Status == TicketStatus.Closed)
                                 {
-                                    <span class="closed-badge">Closed at @ticket.LastUpdatedAt.ToLocalTime().ToString("g")</span>
+                                    <span class="closed-badge">Đóng vào @ticket.LastUpdatedAt.ToLocalTime().ToString("g")</span>
                                 }
 
                                 @if (!string.IsNullOrEmpty(ticket.TicketCategory?.Name))
@@ -187,7 +187,7 @@ else
                                 <div class="details-row">
                                     <div class="details-grid">
                                         <div class="details-item">
-                                            <span class="details-label">Requester</span>
+                                            <span class="details-label">Người yêu cầu</span>
                                             @if (ticket.Requester != null)
                                             {
                                                 <div class="details-value">
@@ -205,7 +205,7 @@ else
                                         </div>
 
                                         <div class="details-item">
-                                            <span class="details-label">Assignee</span>
+                                            <span class="details-label">Người gán</span>
                                             @if (ticket.Assignee != null)
                                             {
                                                 <div class="details-value">
@@ -223,22 +223,22 @@ else
                                         </div>
 
                                         <div class="details-item">
-                                            <span class="details-label">Status</span>
+                                            <span class="details-label">Trạng Thái</span>
                                             <div class="details-value">@ticket.Status</div>
                                         </div>
 
                                         <div class="details-item">
-                                            <span class="details-label">Priority</span>
+                                            <span class="details-label">Độ Ưu Tiên</span>
                                             <div class="details-value">@ticket.Priority</div>
                                         </div>
 
                                         <div class="details-item">
-                                            <span class="details-label">Last Updated</span>
+                                            <span class="details-label">Cập Nhật Cuối</span>
                                             <div class="details-value">@ticket.LastUpdatedAt.ToString("g")</div>
                                         </div>
 
                                         <div class="details-item">
-                                            <span class="details-label">Created</span>
+                                            <span class="details-label">Ngày Tạo</span>
                                             <div class="details-value">@ticket.CreatedAt.ToString("g")</div>
                                         </div>
                                     </div>
@@ -251,21 +251,21 @@ else
                                 <button class="btn btn-assign btn-sm"
                                         @onclick="() => OpenAssignModal(ticket)"
                                         disabled="@(ticket.Status != TicketStatus.Open)">
-                                    @(string.IsNullOrEmpty(ticket.AssigneeId) ? "Assign" : "Change")
+                                    @(string.IsNullOrEmpty(ticket.AssigneeId) ? "Gán" : "Đổi Người")
                                 </button>
 
                                 <button class="btn btn-change-status btn-sm"
                                         @onclick="() => OpenChangeStatusModal(ticket)"
                                         disabled="@(ticket.Status == TicketStatus.Closed)">
-                                    Change Status
+                                    Đổi Trạng Thái
                                 </button>
 
-                                <a class="btn btn-details btn-sm" href="@($"/ticket/{ticket.Id}")">Details</a>
+                                <a class="btn btn-details btn-sm" href="@($"/ticket/{ticket.Id}")">Chi tiết</a>
 
                                 <button class="btn btn-delete btn-sm"
                                         @onclick="() => DeleteTicket(ticket.Id)"
                                         disabled="@(ticket.Status != TicketStatus.Open)">
-                                    Delete
+                                    Xóa
                                 </button>
                             </div>
                         </td>
@@ -283,12 +283,12 @@ else
     <div class="modal-panel">
         <div class="modal-body">
             <div class="d-flex justify-content-between align-items-center mb-2">
-                <h5 class="mb-0">Assign Ticket #@assigningTicket?.Id</h5>
+                <h5 class="mb-0">Gán Ticket #@assigningTicket?.Id</h5>
                 <button class="btn btn-sm btn-outline-secondary" @onclick="CloseAssignModal">✕</button>
             </div>
 
             <div class="mb-2">
-                <input class="form-control" placeholder="Search user..." @bind="assignSearch" @bind:event="oninput" />
+                <input class="form-control" placeholder="Tìm kiếm người dùng..." @bind="assignSearch" @bind:event="oninput" />
             </div>
 
             <div class="list-user">
@@ -337,12 +337,12 @@ else
     <div class="modal-panel">
         <div class="modal-body">
             <div class="d-flex justify-content-between align-items-center mb-2">
-                <h5 class="mb-0">Change Status - Ticket #@statusChangingTicket?.Id</h5>
+                <h5 class="mb-0">Đổi trạng thái - Ticket #@statusChangingTicket?.Id</h5>
                 <button class="btn btn-sm btn-outline-secondary" @onclick="CloseChangeStatusModal">✕</button>
             </div>
 
             <div class="mb-2">
-                <label class="form-label">Select new status</label>
+                <label class="form-label">Đổi trạng thái</label>
                 <select class="form-select" @bind="selectedNewStatus">
                     @if (statusChangingTicket != null)
                     {
@@ -359,8 +359,8 @@ else
             </div>
 
             <div class="mt-3 d-flex justify-content-end gap-2">
-                <button class="btn btn-secondary" @onclick="CloseChangeStatusModal">Cancel</button>
-                <button class="btn btn-primary" @onclick="ConfirmChangeStatus" disabled="@(statusChangingTicket == null || selectedNewStatus == null || statusChangingTicket.Status == TicketStatus.Closed)">Confirm</button>
+                <button class="btn btn-secondary" @onclick="CloseChangeStatusModal">Hủy</button>
+                <button class="btn btn-primary" @onclick="ConfirmChangeStatus" disabled="@(statusChangingTicket == null || selectedNewStatus == null || statusChangingTicket.Status == TicketStatus.Closed)">Xác nhận</button>
             </div>
         </div>
     </div>
@@ -505,7 +505,7 @@ else
         catch (Exception ex)
         {
             Console.WriteLine($"[Assign] {ex}");
-            ToastService.ShowToast("Error assigning ticket. Please try again.", ToastLevel.Error);
+            ToastService.ShowToast("Lỗi gán ticket. Vui lòng thử lại.", ToastLevel.Error);
         }
         finally
         {
@@ -555,12 +555,12 @@ else
         // Prevent backward transitions
         if (newOrder < currentOrder)
         {
-            ToastService.ShowToast("Cannot change status to a previous (earlier) status.", ToastLevel.Warning);
+            ToastService.ShowToast("Không thể chuyển trạng thái về trạng thái trước đó.", ToastLevel.Warning);
             return;
         }
 
         // Ask final confirm
-        var ok = await JSRuntime.InvokeAsync<bool>("confirm", $"Change status of ticket #{statusChangingTicket.Id} from {statusChangingTicket.Status} to {selectedNewStatus.Value}? This action will update LastUpdated time.");
+        var ok = await JSRuntime.InvokeAsync<bool>("confirm", $"Đổi trạng thái của ticket #{statusChangingTicket.Id} từ {statusChangingTicket.Status} sang {selectedNewStatus.Value}? Hành động này sẽ cập nhật thời gian LastUpdated.");
         if (!ok) return;
 
         try
@@ -570,7 +570,7 @@ else
             var t = await db.Tickets.FirstOrDefaultAsync(x => x.Id == statusChangingTicket.Id);
             if (t == null)
             {
-                ToastService.ShowToast("Ticket not found.", ToastLevel.Error);
+                ToastService.ShowToast("Không tìm thấy ticket.", ToastLevel.Error);
                 return;
             }
 
@@ -578,7 +578,7 @@ else
             var dbCurrentOrder = GetStatusOrder(t.Status);
             if (GetStatusOrder(selectedNewStatus.Value) < dbCurrentOrder)
             {
-                ToastService.ShowToast("Cannot change status to a previous (earlier) status.", ToastLevel.Warning);
+                ToastService.ShowToast("Không thể chuyển trạng thái về trạng thái trước đó.", ToastLevel.Warning);
                 return;
             }
 
@@ -603,7 +603,7 @@ else
         catch (Exception ex)
         {
             Console.WriteLine($"[ChangeStatus] {ex}");
-            ToastService.ShowToast("Error updating status. Please try again.", ToastLevel.Error);
+            ToastService.ShowToast("Lỗi cập nhật trạng thái", ToastLevel.Error);
         }
         finally
         {
@@ -618,23 +618,23 @@ else
         if (t == null) return;
         if (t.Status != TicketStatus.Open)
         {
-            ToastService.ShowToast("Cannot delete ticket unless status is Open.", ToastLevel.Warning);
+            ToastService.ShowToast("Không thể xóa ticket trừ khi trạng thái là Mở.", ToastLevel.Warning);
             return;
         }
 
-        var ok = await JSRuntime.InvokeAsync<bool>("confirm", "Are you sure to delete this ticket? This cannot be undone.");
+        var ok = await JSRuntime.InvokeAsync<bool>("confirm", "Bạn có chắc chắn muốn xóa ticket này? Hành động này không thể hoàn tác.");
         if (!ok) return;
 
         try
         {
             await TicketService.DeleteTicketAsync(ticketId);
             allTickets?.RemoveAll(x => x.Id == ticketId);
-            ToastService.ShowToast($"Deleted ticket {ticketId}.", ToastLevel.Info);
+            ToastService.ShowToast($"Đã xóa ticket {ticketId}.", ToastLevel.Info);
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[Delete] {ex}");
-            ToastService.ShowToast("Error deleting ticket.", ToastLevel.Error);
+            ToastService.ShowToast("Lỗi xóa ticket", ToastLevel.Error);
         }
         StateHasChanged();
     }

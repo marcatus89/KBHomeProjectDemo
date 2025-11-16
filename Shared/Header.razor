@@ -75,8 +75,8 @@
 
     protected override async Task OnInitializedAsync()
     {
-        // Debug: in ra hash của CartService để kiểm tra instance
-        Console.WriteLine($"[Header] OnInitialized. CartSvc hash={CartSvc?.GetHashCode() ?? 0}, totalQty={CartSvc?.Items.Sum(i => i.Quantity) ?? 0}");
+        // Debug: log via ILogger, not Console
+        Logger.LogDebug("[Header] OnInitialized. CartSvcHash={Hash}, totalQty={TotalQty}", CartSvc?.GetHashCode() ?? 0, CartSvc?.Items.Sum(i => i.Quantity) ?? 0);
         SubscribeCart();
 
         try
@@ -86,7 +86,7 @@
                                  .AsNoTracking()
                                  .OrderBy(c => c.Name)
                                  .ToListAsync();
-            Console.WriteLine($"[Header] Loaded {categories.Count} categories.");
+            Logger.LogDebug("[Header] Loaded {Count} categories.", categories.Count);
         }
         catch (Exception ex)
         {
@@ -115,7 +115,7 @@
         {
             CartSvc.OnChange += StateHasChanged;
             subscribed = true;
-            Console.WriteLine($"[Header] Subscribed to CartSvc.OnChange (CartSvc hash={CartSvc?.GetHashCode() ?? 0})");
+            Logger.LogDebug("[Header] Subscribed to CartSvc.OnChange (CartSvcHash={Hash})", CartSvc?.GetHashCode() ?? 0);
         }
     }
 
@@ -126,7 +126,7 @@
             try
             {
                 CartSvc.OnChange -= StateHasChanged;
-                Console.WriteLine("[Header] Unsubscribed from CartSvc.OnChange");
+                Logger.LogDebug("[Header] Unsubscribed from CartSvc.OnChange");
             }
             catch (Exception ex)
             {

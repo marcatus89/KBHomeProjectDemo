@@ -1,18 +1,12 @@
 using System;
-using System.Collections.Generic;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using DoAnTotNghiep.Data;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.EntityFrameworkCore;
+using DoAnTotNghiep.Data;
 using Microsoft.Extensions.Configuration;
-using Microsoft.AspNetCore.Identity;
-using Microsoft.IdentityModel.Tokens;
+using Microsoft.EntityFrameworkCore;
 
 namespace DoAnTotNghiep
 {
@@ -32,104 +26,62 @@ namespace DoAnTotNghiep
                     var env = services.GetRequiredService<IHostEnvironment>();
                     var config = services.GetRequiredService<IConfiguration>();
 
-                    var context = services.GetRequiredService<ApplicationDbContext>();
-
-                    // Áp migration (với retry nhẹ nếu muốn)
-                    var retry = 0;
-                    var maxRetry = 5;
-                    while (true)
+                    // Kiểm tra connection string trước khi lấy context để tránh lỗi "ConnectionString property has not been initialized."
+                    var connectionString = config.GetConnectionString("DefaultConnection");
+                    if (string.IsNullOrWhiteSpace(connectionString))
                     {
-                        try
-                        {
-                            await context.Database.MigrateAsync();
-                            logger.LogInformation("Database migrations applied successfully.");
-                            break;
-                        }
-                        catch (Exception ex) when (retry < maxRetry)
-                        {
-                            retry++;
-                            logger.LogWarning(ex, "Migration failed (attempt {Attempt}/{Max}), retrying in 3s...", retry, maxRetry);
-                            await Task.Delay(TimeSpan.FromSeconds(3));
-                        }
+                        logger.LogWarning("ConnectionStrings:DefaultConnection is not configured. Skipping migrations and seeding. " +
+                                          "Set ConnectionStrings:DefaultConnection via environment variable, user-secrets or appsettings to enable migrations.");
                     }
-
-                    // Seed dữ liệu mẫu (synchronous/async tuỳ implement)
-                    SeedData.Initialize(context, logger);
-                    await SeedIdentity.SeedRolesAndAdminAsync(services);
-
-                    // --- DEV ONLY: tạo token cho admin và in ra console ---
-                    if (env.IsDevelopment())
+                    else
                     {
+                        var context = services.GetRequiredService<ApplicationDbContext>();
+
+                        // Áp migration với retry + exponential backoff
+                        var maxRetry = 5;
+                        var delaySeconds = 2;
+                        for (int attempt = 1; attempt <= maxRetry; attempt++)
+                        {
+                            try
+                            {
+                                await context.Database.MigrateAsync();
+                                logger.LogInformation("Database migrations applied successfully.");
+                                break;
+                            }
+                            catch (Exception ex)
+                            {
+                                if (attempt == maxRetry)
+                                {
+                                    logger.LogError(ex, "Database migration failed after {Attempts} attempts.", maxRetry);
+                                    throw; // để outer catch xử lý / dừng app
+                                }
+
+                                logger.LogWarning(ex, "Migration failed (attempt {Attempt}/{Max}), retrying in {Delay}s...", attempt, maxRetry, delaySeconds);
+                                // exponential backoff with cap
+                                await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
+                                delaySeconds = Math.Min(delaySeconds * 2, 30);
+                            }
+                        }
+
+                        // Seed dữ liệu mẫu (synchronous/async tuỳ implement)
                         try
                         {
-                            var userManager = services.GetRequiredService<UserManager<IdentityUser>>();
-                            var adminEmail = "admin@kbhome.vn"; // sửa nếu email admin khác
-                            var admin = await userManager.FindByEmailAsync(adminEmail);
-
-                            if (admin != null)
-                            {
-                                var jwtSection = config.GetSection("Jwt");
-                                var keyString = jwtSection["Key"];
-                                var issuer = jwtSection["Issuer"];
-                                var audience = jwtSection["Audience"];
-                                if (string.IsNullOrWhiteSpace(keyString) || string.IsNullOrWhiteSpace(issuer) || string.IsNullOrWhiteSpace(audience))
-                                {
-                                    logger.LogWarning("Jwt configuration (Key/Issuer/Audience) is missing — cannot generate dev token.");
-                                }
-                                else
-                                {
-                                    var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(keyString));
-                                    var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-                                    var claims = new List<Claim>
-                                    {
-                                        new Claim(JwtRegisteredClaimNames.Sub, admin.Id),
-                                        new Claim(JwtRegisteredClaimNames.Email, admin.Email ?? string.Empty),
-                                        new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
-                                    };
-
-                                    var roles = await userManager.GetRolesAsync(admin);
-                                    foreach (var r in roles)
-                                    {
-                                        claims.Add(new Claim(ClaimTypes.Role, r));
-                                    }
-
-                                    double expiryMinutes = 60;
-                                    if (double.TryParse(jwtSection["ExpiryMinutes"], out var parsed)) expiryMinutes = parsed;
-
-                                    var token = new JwtSecurityToken(
-                                        issuer: issuer,
-                                        audience: audience,
-                                        claims: claims,
-                                        expires: DateTime.UtcNow.AddMinutes(expiryMinutes),
-                                        signingCredentials: creds
-                                    );
-
-                                    var tokenString = new JwtSecurityTokenHandler().WriteToken(token);
-
-                                    Console.WriteLine();
-                                    Console.WriteLine("-----------------------------------------------------------");
-                                    Console.WriteLine("DEVELOPMENT JWT for admin ({0}):", adminEmail);
-                                    Console.WriteLine(tokenString);
-                                    Console.WriteLine("Expires (UTC): {0:u}", token.ValidTo);
-                                    Console.WriteLine("-----------------------------------------------------------");
-                                    Console.WriteLine();
-                                }
-                            }
-                            else
-                            {
-                                logger.LogWarning("Admin user with email '{Email}' not found; cannot create dev JWT.", adminEmail);
-                            }
+                            SeedData.Initialize(context, logger);
                         }
                         catch (Exception ex)
                         {
-                            logger.LogWarning(ex, "Failed to create development JWT token.");
+                            logger.LogError(ex, "SeedData.Initialize failed.");
+                            // don't rethrow seed errors necessarily, but you can choose to fail-fast
                         }
+
+                        await SeedIdentity.SeedRolesAndAdminAsync(services);
                     }
+
+                    // --- DEV ONLY: nếu cần thông tin debug, dùng logger ở mức Debug — KHÔNG in token ra console ---
                 }
                 catch (Exception ex)
                 {
-                    // Reuse existing logger variable instead of redeclaring
+                    // Reuse the existing logger declared above
                     logger.LogError(ex, "An error occurred during database initialization or seeding.");
                     throw;
                 }
@@ -140,6 +92,12 @@ namespace DoAnTotNghiep
 
         public static IHostBuilder CreateHostBuilder(string[] args) =>
             Host.CreateDefaultBuilder(args)
+                .ConfigureLogging(logging =>
+                {
+                    logging.ClearProviders();
+                    logging.AddConsole();
+                    logging.SetMinimumLevel(LogLevel.Information);
+                })
                 .ConfigureWebHostDefaults(webBuilder =>
                 {
                     webBuilder.UseStartup<Startup>();

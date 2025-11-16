@@ -1,16 +1,25 @@
 @page "/admin/products/add"
 @page "/admin/products/edit/{ProductId:int}"
-@attribute [Authorize(Roles = "Admin")]
+@attribute [Authorize]
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.EntityFrameworkCore
 @inject ApplicationDbContext DbContext
 @inject NavigationManager Navigation
 @inject ToastService ToastSvc
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
 <h3>@Title</h3>
 
 @if (isLoading)
 {
     <LoadingSpinner />
+}
+else if (!hasPermission)
+{
+    <div class="alert alert-danger">
+        Bạn không có quyền chỉnh sửa sản phẩm này.
+    </div>
 }
 else
 {
@@ -56,6 +65,20 @@ else
             <small class="text-muted">Tối đa 2000 ký tự.</small>
         </div>
 
+        @* Hiển thị số lượng tồn dưới dạng read-only khi đang chỉnh sửa; không cho phép người dùng thay đổi *@
+        @if (ProductId != 0)
+        {
+            <div class="form-group mb-3">
+                <label>Số lượng tồn</label>
+                <div class="form-control-plaintext">@CurrentProduct.StockQuantity</div>
+            </div>
+        }
+
+        <div class="form-check mb-3">
+            <InputCheckbox id="visible" class="form-check-input" @bind-Value="CurrentProduct.IsVisible" />
+            <label class="form-check-label" for="visible">Hiển thị</label>
+        </div>
+
         <button type="submit" class="btn btn-primary">Lưu</button>
         <a href="/admin/products" class="btn btn-secondary">Hủy</a>
     </EditForm>
@@ -69,74 +92,122 @@ else
     private List<Category>? categories;
     private string Title { get; set; } = "Thêm sản phẩm mới";
     private bool isLoading = true;
+    private bool hasPermission = true;
+    private string? currentUserId;
+    private bool isAdmin = false;
 
     protected override async Task OnInitializedAsync()
     {
-        categories = await DbContext.Categories.ToListAsync();
+        categories = await DbContext.Categories.OrderBy(c => c.Name).ToListAsync();
     }
 
     protected override async Task OnParametersSetAsync()
     {
+        isLoading = true;
+        hasPermission = true;
+
+        // Get current user info
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        currentUserId = user.FindFirstValue(ClaimTypes.NameIdentifier) ?? user.FindFirstValue(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub);
+        isAdmin = user.IsInRole("Admin");
+
         if (ProductId != 0)
         {
             Title = "Chỉnh sửa sản phẩm";
             var productFromDb = await DbContext.Products.FindAsync(ProductId);
             if (productFromDb != null)
             {
-                CurrentProduct = productFromDb;
+                // Check permission: owner or admin
+                if (!isAdmin && !string.Equals(productFromDb.OwnerId ?? string.Empty, currentUserId ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+                {
+                    hasPermission = false;
+                    CurrentProduct = productFromDb; // still show read-only or message
+                }
+                else
+                {
+                    CurrentProduct = productFromDb;
+                }
+            }
+            else
+            {
+                ToastSvc.ShowToast("Không tìm thấy sản phẩm.", ToastLevel.Warning);
+                Navigation.NavigateTo("/admin/products");
             }
         }
-        else 
+        else
         {
             Title = "Thêm sản phẩm mới";
             CurrentProduct = new Product();
+            // For create, ensure we have a user id
+            if (string.IsNullOrWhiteSpace(currentUserId))
+            {
+                ToastSvc.ShowToast("Bạn cần đăng nhập để thêm sản phẩm.", ToastLevel.Warning);
+                Navigation.NavigateTo("/Identity/Account/Login");
+            }
         }
+
         isLoading = false;
+        StateHasChanged();
     }
 
     private async Task HandleValidSubmit()
     {
-        // 🔹 Chuẩn hóa tên sản phẩm: bỏ khoảng trắng thừa và chữ hoa/thường
-        var normalizedName = NormalizeName(CurrentProduct.Name);
+        if (!hasPermission)
+        {
+            ToastSvc.ShowToast("Bạn không có quyền thực hiện thao tác này.", ToastLevel.Warning);
+            return;
+        }
 
+        // Chuẩn hóa tên
+        var normalizedName = NormalizeName(CurrentProduct.Name);
         if (string.IsNullOrWhiteSpace(normalizedName))
         {
             ToastSvc.ShowToast("⚠️ Tên sản phẩm không được để trống.", ToastLevel.Warning);
             return;
         }
 
-        // 🔹 Kiểm tra trùng tên trong bộ nhớ để tránh lỗi LINQ translation
-        var existingNames = await DbContext.Products
+        // Check duplicate name (case-insensitive)
+        var existing = await DbContext.Products
             .AsNoTracking()
+            .Where(p => p.Id != CurrentProduct.Id)
             .Select(p => new { p.Id, p.Name })
             .ToListAsync();
 
-        bool nameExists = existingNames
-            .Any(p => NormalizeName(p.Name) == normalizedName && p.Id != ProductId);
-
-        if (nameExists)
+        if (existing.Any(p => NormalizeName(p.Name) == normalizedName))
         {
             ToastSvc.ShowToast("❌ Tên sản phẩm đã tồn tại (không phân biệt hoa/thường hoặc khoảng trắng).", ToastLevel.Error);
             return;
         }
 
-        // ✅ Thêm hoặc cập nhật sản phẩm
-        if (ProductId == 0)
+        // If new product, set OwnerId and CreatedAt
+        if (CurrentProduct.Id == 0)
         {
+            CurrentProduct.OwnerId = currentUserId;
+            CurrentProduct.CreatedAt = DateTime.UtcNow;
+            // StockQuantity remains default (e.g. 0) because the UI does not allow editing it here
             DbContext.Products.Add(CurrentProduct);
             ToastSvc.ShowToast($"✅ Đã thêm sản phẩm \"{CurrentProduct.Name}\" thành công.", ToastLevel.Success);
         }
         else
         {
-            var productToUpdate = await DbContext.Products.FindAsync(ProductId);
+            // Update existing: DO NOT overwrite StockQuantity from UI (we keep DB value)
+            var productToUpdate = await DbContext.Products.FindAsync(CurrentProduct.Id);
             if (productToUpdate != null)
             {
                 productToUpdate.Name = CurrentProduct.Name;
                 productToUpdate.Price = CurrentProduct.Price;
                 productToUpdate.ImageUrl = CurrentProduct.ImageUrl;
                 productToUpdate.CategoryId = CurrentProduct.CategoryId;
-                productToUpdate.Description = CurrentProduct.Description; // <-- cập nhật mô tả
+                productToUpdate.Description = CurrentProduct.Description;
+                // IMPORTANT: intentionally do NOT set productToUpdate.StockQuantity here
+                productToUpdate.IsVisible = CurrentProduct.IsVisible;
+                productToUpdate.UpdatedAt = DateTime.UtcNow;
                 ToastSvc.ShowToast($"✅ Đã cập nhật sản phẩm \"{productToUpdate.Name}\" thành công.", ToastLevel.Success);
+            }
+            else
+            {
+                ToastSvc.ShowToast("Không tìm thấy sản phẩm để cập nhật.", ToastLevel.Warning);
             }
         }
 
@@ -144,11 +215,10 @@ else
         Navigation.NavigateTo("/admin/products");
     }
 
-    // 🧹 Chuẩn hóa tên: loại bỏ khoảng trắng dư và chuyển sang chữ thường
+    // Chuẩn hóa tên: loại bỏ khoảng trắng dư và chuyển sang chữ thường
     private string NormalizeName(string name)
     {
         if (string.IsNullOrWhiteSpace(name)) return string.Empty;
-        // Xóa khoảng trắng thừa giữa các từ và hai đầu
         var cleaned = string.Join(" ", name.Split(' ', StringSplitOptions.RemoveEmptyEntries));
         return cleaned.Trim().ToLower();
     }

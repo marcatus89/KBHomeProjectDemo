@@ -45,7 +45,6 @@ namespace DoAnTotNghiep.Data
             // Thêm cấu hình cho ReturnReceiptItem.UnitPrice
             builder.Entity<ReturnReceiptItem>().Property(rri => rri.UnitPrice).HasPrecision(18, 2);
 
-
             // ---------- Identity column sizing ----------
             // Các cấu hình này đảm bảo EF dùng nvarchar(450) cho các Id/khóa
             builder.Entity<IdentityUser>(b =>
@@ -128,6 +127,17 @@ namespace DoAnTotNghiep.Data
                 .WithMany(t => t.Watchers)
                 .HasForeignKey(tw => tw.TicketId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // --------------------------------------
+            // Product ownership & sizing
+            // --------------------------------------
+            builder.Entity<Product>(b =>
+            {
+                // OwnerId tương ứng với IdentityUser.Id (nvarchar(450))
+                b.Property(p => p.OwnerId).HasMaxLength(450);
+                // index giúp tra cứu nhanh theo owner
+                b.HasIndex(p => p.OwnerId);
+            });
         }
     }
 }
